@@ -1,3 +1,8 @@
+
+
+<img width="2272" height="1888" alt="M2Suite_Logo" src="https://github.com/user-attachments/assets/91dad2ee-d302-4e2c-b8c4-8910b9b0afcf" />
+
+
 # M2Suite
 Converter &amp; Visualizer for 3DO / Panasonic M2 file formats.
 
