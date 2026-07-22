@@ -1,6 +1,9 @@
 #include "FileTypes.h"
 
 #include <QFile>
+#include <QFileInfo>
+
+#include <algorithm>
 
 #include "m2model/AitdImage.h"
 #include "m2model/AitdPak.h"
@@ -33,6 +36,45 @@ bool aitdPakHoldsModels(const QString& path) {
     } catch (const std::exception&) {
         return false;
     }
+}
+
+// Cheap structural test for an AITD PAK offset table, done entirely on the
+// header bytes plus the file size: offsets[0] is 0, offsets[1] doubles as
+// the table size, and every offset must be strictly increasing and inside
+// the file. Reading a handful of table entries is enough to reject
+// essentially anything that merely starts with four zero bytes, which
+// keeps the (much more expensive) decompression probe off the hot path
+// when scanning a whole game folder.
+bool looksLikeAitdPakTable(const QString& path, const char* buf, qint64 n) {
+    if (n < 16 || buf[0] || buf[1] || buf[2] || buf[3]) {
+        return false;
+    }
+    auto rd32 = [&](qint64 o) {
+        return quint32(quint8(buf[o])) | (quint32(quint8(buf[o + 1])) << 8) |
+               (quint32(quint8(buf[o + 2])) << 16) | (quint32(quint8(buf[o + 3])) << 24);
+    };
+    quint32 tableSize = rd32(4);
+    if (tableSize < 8 || tableSize % 4 != 0 || tableSize > 0x100000) {
+        return false;
+    }
+    qint64 fileSize = QFileInfo(path).size();
+    if (tableSize >= fileSize) {
+        return false;
+    }
+    // Walk as many table entries as the header sample covers.
+    qint64 avail = std::min<qint64>(n, tableSize);
+    quint32 prev = tableSize;
+    for (qint64 o = 8; o + 4 <= avail; o += 4) {
+        quint32 off = rd32(o);
+        if (off == 0) {
+            break; // unused tail slots are zero-filled
+        }
+        if (off <= prev || off >= fileSize) {
+            return false;
+        }
+        prev = off;
+    }
+    return true;
 }
 
 bool tagIs(const char* buf, const char* tag) {
@@ -168,12 +210,12 @@ FileType sniffFileType(const QString& path) {
         if (bodyName) {
             return FileType::AitdPak;
         }
-        if (n >= 8 && buf[0] == 0 && buf[1] == 0 && buf[2] == 0 && buf[3] == 0) {
-            quint32 tableSize = quint32(quint8(buf[4])) | (quint32(quint8(buf[5])) << 8) |
-                                (quint32(quint8(buf[6])) << 16) | (quint32(quint8(buf[7])) << 24);
-            if (tableSize >= 8 && tableSize % 4 == 0 && tableSize < 0x100000) {
-                return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
-            }
+        if (looksLikeAitdPakTable(path, buf, n)) {
+            // Probing costs a few decompressions, so it runs only once the
+            // offset table has already been validated against the real file
+            // size — that gate rejects essentially everything that merely
+            // happens to start with four zero bytes.
+            return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
         }
     }
 
