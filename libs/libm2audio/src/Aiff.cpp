@@ -38,7 +38,46 @@ double readExtended80(ByteReader& r) {
     double value = std::ldexp(double(mantissa), exponent - 16383 - 63);
     return sign * value;
 }
+constexpr uint64_t kSector = 2048; // catalogue entries align to CD sectors
+
+bool isFormAiff(const uint8_t* p) {
+    return p[0] == 'F' && p[1] == 'O' && p[2] == 'R' && p[3] == 'M' && p[8] == 'A' &&
+           p[9] == 'I' && p[10] == 'F' && (p[11] == 'F' || p[11] == 'C');
+}
+uint32_t beU32(const uint8_t* p) {
+    return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) |
+           uint32_t(p[3]);
+}
 } // namespace
+
+std::vector<AiffCatalogueEntry> scanAiffCatalogue(const uint8_t* data, size_t size) {
+    std::vector<AiffCatalogueEntry> out;
+    if (size < 12) {
+        return out;
+    }
+    for (uint64_t off = 0; off + 12 <= size; off += kSector) {
+        const uint8_t* p = data + off;
+        if (!isFormAiff(p)) {
+            continue;
+        }
+        uint64_t formSize = uint64_t(beU32(p + 4)) + 8;
+        if (formSize < 12 || off + formSize > size) {
+            continue; // truncated or a coincidence
+        }
+        out.push_back({off, formSize});
+    }
+    return out;
+}
+
+bool looksLikeAiffCatalogue(const uint8_t* header, size_t headerSize, uint64_t fileSize) {
+    if (headerSize < 12 || !isFormAiff(header)) {
+        return false;
+    }
+    uint64_t formSize = uint64_t(beU32(header + 4)) + 8;
+    // A single sound accounts for its whole file (bar a little padding). A
+    // catalogue leaves sectors of it unexplained.
+    return fileSize > formSize + kSector;
+}
 
 Aiff Aiff::load(const uint8_t* data, size_t size) {
     // Some discs bundle several sounds in a 3DO 'RSRC' resource file (an

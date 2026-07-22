@@ -36,6 +36,7 @@ enum class FileType {
     Aifc,          // 'FORM'+'AIFC'                     — previewable
     Wav,           // 'RIFF'+'WAVE'                     — previewable
     RsrcBundle,    // 'RSRC' — resource bundle, commonly of AIFFs
+    SoundCatalogue,// many FORM/AIFF sounds concatenated (AITD LISTSAMP.CAT)
     Instrument,    // 'FORM'+'3INS' — DSP instrument
 
     // --- 3D ---

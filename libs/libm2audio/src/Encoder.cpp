@@ -163,16 +163,21 @@ const char* codecName(AudioCodec codec) {
     return "?";
 }
 
+// Plain ASCII, deliberately. These are char* in a Qt-free library, so any
+// non-ASCII byte here depends on the compiler's source charset and on the
+// caller decoding it the same way. An em dash written as UTF-8 and read
+// back through QString::fromLatin1 came out as mojibake in the converter
+// dialog ("the 3DO workhorse a what most shipping titles used").
 const char* codecDescription(AudioCodec codec) {
     switch (codec) {
         case AudioCodec::Pcm16:
-            return "Uncompressed, exact. Twice the size of everything else — "
+            return "Uncompressed, exact. Twice the size of everything else - "
                    "use when quality matters more than disc space.";
         case AudioCodec::Pcm8:
             return "Uncompressed 8-bit. Same size as the 2:1 codecs but "
                    "noticeably noisier; SDX2 is the better trade.";
         case AudioCodec::Sdx2:
-            return "Squareroot-delta-exact, 2:1. The 3DO workhorse — what "
+            return "Squareroot-delta-exact, 2:1. The 3DO workhorse - what "
                    "most shipping titles used, and what FILM/DataStreamer "
                    "audio expects. Recommended.";
         case AudioCodec::Sqs2:

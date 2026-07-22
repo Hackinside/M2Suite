@@ -2,6 +2,44 @@
 
 ## Unreleased
 
+### Fixed: structural file detection was dead
+
+Three things reported as broken shared one cause. The file sniffer read a
+**12-byte** header, but the structural probes need far more — an AITD PAK
+offset table is walked entry by entry, and a backdrop header is 4 bytes
+followed by a 768-byte palette. Every probe failed its own length guard and
+silently returned false, so **no PAK and no backdrop was ever recognised**,
+however valid the file. The sniffer now reads 512 bytes and passes the real
+file size separately.
+
+- **AITD archives appear in the file browser again** — models, rooms,
+  animations, masks, sound archives and scripts.
+- **Backdrops open**, and a second bug surfaced once they did: pages pad to
+  a **4 KiB boundary**, not to a fixed 64 KiB page. Every backdrop first
+  sampled was 320×200, whose payload rounds to exactly 65536 — so the wrong
+  constant fitted perfectly. AITD1's `camera00.pics` (240×200) and AITD2's
+  `camera01.pics` (320×250) were rejected outright. See
+  [docs/FORMATS.md](docs/FORMATS.md#pre-rendered-backdrops--pics--bob--pad).
+
+### Sound catalogues
+
+- **`LISTSAMP.CAT` and friends now open** — 193 sound effects, browsable and
+  playable one by one, exportable as WAV. They are complete FORM/AIFF files
+  concatenated on 2048-byte CD-sector boundaries. Sector alignment is what
+  makes them findable: scanning for the `FORM` tag anywhere also hits the
+  pattern inside sample data.
+
+### Fixed
+
+- **Garbled characters in the audio converter.** Codec descriptions are
+  `char*` in a Qt-free library; an em dash written as UTF-8 and read back
+  through `QString::fromLatin1` came out as mojibake ("the 3DO workhorse å
+  what most shipping titles used"). The strings are plain ASCII now and the
+  GUI decodes them as UTF-8.
+- **Removed File > Load AITD Name Database.** The databases are bundled, so
+  entries are named out of the box; an external or updated one is still
+  picked up automatically from beside the game or beside the executable.
+
 ### Stage viewer — AITD rooms and floors
 
 - **`ETAGE*.PAK` floors open in the 3D viewport.** A floor's rooms assemble

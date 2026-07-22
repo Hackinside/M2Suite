@@ -599,14 +599,49 @@ u8  pixels[w*h]    one palette index per pixel
 ```
 
 - `.bob` — a single un-padded page
-- `.pad` — a single page padded to 64 KiB
-- `.pics` — one or more pages, **each** padded to 64 KiB
+- `.pad` — a single padded page
+- `.pics` — one or more pages, each padded
 
 **Finding (verified) — by exact arithmetic.** `4 + 768 + 320×200 = 64772`,
 which is the exact byte size of `CAM8003.BOB`. That is not a coincidence,
 and it confirms the palette size and pixel depth in one step. Decoded output
-was then visually checked: recognisable AITD 2 rooms (the tree and mansion
-exterior, the cellar stairs, the attic bedroom).
+was then visually checked against recognisable rooms.
+
+**Finding (verified) — pages pad to a 4 KiB boundary, and dimensions are
+not fixed.** This one was originally got wrong in an instructive way. Every
+AITD2 backdrop first sampled was 320×200, whose payload of 64772 bytes
+rounds to exactly 65536 — so "pages are padded to 64 KiB" fitted perfectly
+and was hard-coded. It is wrong:
+
+| File | Size | Payload | Stride | Pages |
+|---|---|---|---|---|
+| `camera00.pics` (AITD1) | 240×200 | 48772 | 49152 | 5 |
+| `camera01.pics` (AITD2) | 320×250 | 80772 | 81920 | 15 |
+| `camera03.pics` (AITD2) | 320×200 | 64772 | 65536 | 2 |
+
+The rule is `stride = roundUp(4 + 768 + w×h, 4096)`, and every page in a
+file shares the first page's dimensions. Under the 64 KiB assumption both
+non-320×200 files were rejected outright — a reminder that a constant which
+fits every sample can still be a coincidence, and that the cheapest defence
+is a sample whose dimensions differ.
+
+### Sound catalogues — `LISTSAMP.CAT`
+
+**Finding (verified).** AITD2 ships its sound effects as many complete
+`FORM`/`AIFF` files concatenated into one container, each starting on a
+**2048-byte boundary** (one CD sector) with the gaps zero-padded.
+`LISTSAMP.CAT` holds **193** sounds; `.FRE` and `.jpn` carry the localised
+sets.
+
+The sector alignment is the reliable signal. Scanning for the `FORM` tag at
+*any* offset also matches the byte pattern occurring inside sample data —
+three false positives in `LISTSAMP.CAT` alone — so only sector boundaries
+are considered. Walking the chain sequentially does not work either: the
+file has gaps that are not sounds, and a sequential walk stops after 66 of
+the 193.
+
+A catalogue is told apart from a single sound structurally: it opens with a
+`FORM` whose declared size leaves most of the file unaccounted for.
 
 ### Rooms and floors — `ETAGE*.PAK`
 

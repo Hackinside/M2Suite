@@ -16,6 +16,28 @@ namespace m2audio {
 // (e.g. 'sowt' little-endian, 3DO 'SDX2'/ADPCM variants referenced by the
 // SquashSnd tool) throw m2core::NotImplementedError until a real fixture
 // motivates them.
+// A sound catalogue: many complete 'FORM AIFF'/'FORM AIFC' files
+// concatenated in one container, each starting on a 2048-byte boundary
+// (one CD sector) with the gaps zero-padded. Alone in the Dark 2 ships its
+// effects this way — LISTSAMP.CAT holds 193 sounds, with .FRE and .jpn
+// carrying the localised sets.
+//
+// The alignment is the reliable signal. Scanning for the 'FORM' tag at any
+// offset also hits the pattern occurring inside sample data (three false
+// positives in LISTSAMP.CAT alone), so only sector boundaries count.
+struct AiffCatalogueEntry {
+    uint64_t offset = 0; // start of the FORM header
+    uint64_t size = 0;   // FORM payload size plus the 8-byte header
+};
+
+// Returns every sound found. Empty when the blob is not a catalogue.
+std::vector<AiffCatalogueEntry> scanAiffCatalogue(const uint8_t* data, size_t size);
+
+// True when a file looks like a catalogue rather than a single sound: it
+// opens with a FORM whose declared size leaves most of the file
+// unaccounted for.
+bool looksLikeAiffCatalogue(const uint8_t* header, size_t headerSize, uint64_t fileSize);
+
 class Aiff {
 public:
     static Aiff load(const uint8_t* data, size_t size);

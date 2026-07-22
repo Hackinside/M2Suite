@@ -5,12 +5,18 @@
 
 #include <algorithm>
 
+#include "m2audio/Aiff.h"
 #include "m2model/AitdImage.h"
 #include "m2model/AitdPak.h"
 
 namespace m2suite {
 
 namespace {
+
+// How much of a file's head to read for identification. Big enough to walk
+// a useful stretch of an AITD PAK offset table and to cover a backdrop's
+// header, small enough that scanning a whole game folder stays fast.
+constexpr int kSniffBytes = 512;
 
 // Probes an AITD PAK for real 3D bodies. Nearly any blob can be coerced
 // through the body parser, so require several entries that carry genuine
@@ -120,8 +126,15 @@ FileType sniffFileType(const QString& path) {
     if (!file.open(QIODevice::ReadOnly)) {
         return FileType::Unknown;
     }
-    char buf[12] = {};
-    qint64 n = file.read(buf, 12);
+    // Magic-byte checks need 12 bytes, but the structural probes need more:
+    // an AITD PAK offset table is walked entry by entry, and a backdrop
+    // header is 4 bytes followed by a 768-byte palette. This buffer used to
+    // be 12 bytes, which meant *every* structural probe failed its own
+    // length guard and silently returned false — no PAK and no backdrop was
+    // ever recognised, however valid the file.
+    char buf[kSniffBytes] = {};
+    qint64 n = file.read(buf, kSniffBytes);
+    const qint64 fileSize = file.size();
     file.close();
 
     const auto* ubuf = reinterpret_cast<const unsigned char*>(buf);
@@ -176,6 +189,13 @@ FileType sniffFileType(const QString& path) {
     if (n >= 12 && (tagIs(buf, "FORM") || tagIs(buf, "CAT "))) {
         const char* type = buf + 8;
         if (tagIs(type, "TXTR")) return FileType::UtfTexture;
+        // A FORM whose declared size leaves most of the file unaccounted
+        // for is a catalogue of sounds, not one sound.
+        if ((tagIs(type, "AIFF") || tagIs(type, "AIFC")) &&
+            m2audio::looksLikeAiffCatalogue(reinterpret_cast<const uint8_t*>(buf), size_t(n),
+                                             uint64_t(fileSize))) {
+            return FileType::SoundCatalogue;
+        }
         if (tagIs(type, "AIFF")) return FileType::Aiff;
         if (tagIs(type, "AIFC")) return FileType::Aifc;
         if (tagIs(type, "3INS")) return FileType::Instrument;
@@ -201,7 +221,8 @@ FileType sniffFileType(const QString& path) {
     // --- Alone in the Dark ------------------------------------------------
     // AITD backdrops (.pics/.bob/.pad) are raw paletted pages with no magic,
     // so they are identified structurally.
-    if (m2model::looksLikeAitdImage(reinterpret_cast<const uint8_t*>(buf), size_t(n))) {
+    if (m2model::looksLikeAitdImage(reinterpret_cast<const uint8_t*>(buf), size_t(n),
+                                     uint64_t(fileSize))) {
         return FileType::AitdImage;
     }
 
@@ -358,6 +379,7 @@ QString fileTypeLabel(FileType type) {
         case FileType::AitdScript: return QStringLiteral("Scripts (AITD PAK)");
         case FileType::AitdSave: return QStringLiteral("Save game (AITD)");
         case FileType::RsrcBundle: return QStringLiteral("Resource bundle (RSRC)");
+        case FileType::SoundCatalogue: return QStringLiteral("Sound catalogue (AIFF)");
         case FileType::Banner: return QStringLiteral("Banner screen (APPSCRN)");
         case FileType::ArmExecutable: return QStringLiteral("Executable (ARM, M1)");
         case FileType::TextFile: return QStringLiteral("Text");
@@ -392,6 +414,7 @@ FileCategory fileTypeCategory(FileType type) {
         case FileType::Aifc:
         case FileType::Wav:
         case FileType::RsrcBundle:
+        case FileType::SoundCatalogue:
         case FileType::Instrument:
             return FileCategory::Audio;
 
@@ -492,7 +515,8 @@ bool fileTypeHasPreview(FileType type) {
         case FileType::M1vc:       // MPEG video in a TAG0 container
         case FileType::Ddf:        // IFF FORM shown as structured text
         case FileType::Intl:       // locale FORM shown as text
-        case FileType::Instrument: // DSP 3INS structure view
+        case FileType::Instrument:     // DSP 3INS structure view
+        case FileType::SoundCatalogue: // browse and play each sound
             return true;
         default:
             return false;

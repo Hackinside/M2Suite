@@ -9,6 +9,7 @@
 #include <QMainWindow>
 
 #include "FileTypes.h"
+#include "m2audio/Aiff.h"
 #include "m2model/AitdImage.h"
 #include "m2model/AitdPak.h"
 #include "m2model/AitdRoom.h"
@@ -71,7 +72,6 @@ private slots:
     void extractDiscImage();
     void convertImagesToUtf();
     void convertAudioTo3do();
-    void loadAitdNameDbDialog();
 
 private:
     void scanFolderIntoTree(const QString& rootPath);
@@ -87,6 +87,7 @@ private:
     void showAitdPakFile(const QString& path);
     void showAitdImageFile(const QString& path);
     void showAitdRoomsFile(const QString& path);
+    void showSoundCatalogue(const QString& path);
     void aitdTick();
     // Looks beside the PAK (and one level up) for an AITD_PakEdit-style
     // "*_PAK_DB.json" and returns entry-index -> name for this archive.
@@ -131,7 +132,7 @@ private:
 
     std::vector<m2texture::Texture> textures_;
     std::vector<QImage> animFrames_;
-    enum class SelectorMode { None, Textures, AnimFrames, AitdBodies, AitdRooms };
+    enum class SelectorMode { None, Textures, AnimFrames, AitdBodies, AitdRooms, SoundCatalogue };
     SelectorMode selectorMode_ = SelectorMode::None;
 
     // --- Playback state ---
@@ -170,6 +171,11 @@ private:
     ModelViewport* modelView_ = nullptr;
     QHash<int, QString> aitdNames_; // entry index -> name, from a PAK_DB.json
     std::vector<m2model::AitdRoom> aitdRooms_; // the open floor, if any
+    // Sound catalogue: the whole file stays resident so each sound can be
+    // decoded on demand without re-reading it.
+    std::vector<uint8_t> catalogueData_;
+    std::vector<m2audio::AiffCatalogueEntry> catalogue_;
+    QString cataloguePath_;
     // MPEG via Qt Multimedia on an extracted elementary stream
     QMediaPlayer* mediaPlayer_ = nullptr;
     QAudioOutput* mediaAudio_ = nullptr;

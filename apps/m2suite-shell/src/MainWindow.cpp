@@ -225,10 +225,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(toUtfAction, &QAction::triggered, this, &MainWindow::convertImagesToUtf);
     auto* toAudioAction = fileMenu->addAction(tr("Convert &Audio to 3DO Format..."));
     connect(toAudioAction, &QAction::triggered, this, &MainWindow::convertAudioTo3do);
-    auto* nameDbAction = fileMenu->addAction(tr("Load AITD &Name Database..."));
-    nameDbAction->setToolTip(tr("An AITD_PakEdit *PAK_DB.json, to label archive "
-                                 "entries with their real names"));
-    connect(nameDbAction, &QAction::triggered, this, &MainWindow::loadAitdNameDbDialog);
+    // No menu entry for loading a name database: the databases are bundled,
+    // so archive entries are named out of the box. An external or updated
+    // one is still picked up automatically from beside the game or beside
+    // the executable — see loadAitdNameDatabase().
     fileMenu->addSeparator();
     auto* exportAction = fileMenu->addAction(tr("&Export Selected..."));
     exportAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
@@ -972,6 +972,9 @@ void MainWindow::openPath(const QString& path, FileType type) {
         case FileType::AitdImage:
             showAitdImageFile(path);
             break;
+        case FileType::SoundCatalogue:
+            showSoundCatalogue(path);
+            break;
         case FileType::M1vc:
             showM1vcFile(path);
             break;
@@ -1565,7 +1568,7 @@ void MainWindow::convertAudioTo3do() {
         m2audio::AudioCodec::Sdx2,  m2audio::AudioCodec::Cbd2,  m2audio::AudioCodec::Adp4,
         m2audio::AudioCodec::Sqs2,  m2audio::AudioCodec::Pcm16, m2audio::AudioCodec::Pcm8};
     for (auto c : codecs) {
-        codecBox->addItem(QString::fromLatin1(m2audio::codecName(c)));
+        codecBox->addItem(QString::fromUtf8(m2audio::codecName(c)));
     }
     codecBox->setCurrentIndex(0); // SDX2, the recommended default
 
@@ -1611,7 +1614,7 @@ void MainWindow::convertAudioTo3do() {
         QString problem = QString::fromStdString(m2audio::validateOptions(o));
         uint32_t bps = m2audio::bitrateBps(o);
         QString text = tr("%1\n\nBitrate: %2 kbit/s — %3 KB per second of audio.")
-                            .arg(QString::fromLatin1(m2audio::codecDescription(o.codec)))
+                            .arg(QString::fromUtf8(m2audio::codecDescription(o.codec)))
                             .arg(bps / 1000.0, 0, 'f', 1)
                             .arg(bps / 8.0 / 1024.0, 0, 'f', 1);
         if (!problem.isEmpty()) {
@@ -1668,7 +1671,7 @@ void MainWindow::convertAudioTo3do() {
             std::vector<uint8_t> out = m2audio::encodeAudioFile(buf, options);
             QString outPath = QStringLiteral("%1/%2.%3")
                                    .arg(outDir, QFileInfo(in).completeBaseName(),
-                                        QString::fromLatin1(ext));
+                                        QString::fromUtf8(ext));
             QFile f(outPath);
             if (f.open(QIODevice::WriteOnly) &&
                 f.write(reinterpret_cast<const char*>(out.data()), qint64(out.size())) ==
@@ -1686,33 +1689,13 @@ void MainWindow::convertAudioTo3do() {
     QString msg = tr("Converted %1 of %2 file(s) to %3 at %4 Hz %5.")
                        .arg(written)
                        .arg(inputs.size())
-                       .arg(QString::fromLatin1(m2audio::codecName(options.codec)))
+                       .arg(QString::fromUtf8(m2audio::codecName(options.codec)))
                        .arg(options.sampleRate)
                        .arg(options.channels == 1 ? tr("mono") : tr("stereo"));
     if (!errors.isEmpty()) {
         msg += QStringLiteral("\n\n") + errors.join(QLatin1Char('\n'));
     }
     QMessageBox::information(this, tr("Convert audio"), msg);
-}
-
-void MainWindow::loadAitdNameDbDialog() {
-    QString start = QSettings().value(QStringLiteral("aitd/nameDb")).toString();
-    QString path = QFileDialog::getOpenFileName(
-        this, tr("Load AITD name database"), start,
-        tr("AITD name database (*PAK_DB.json *.json);;All files (*)"));
-    if (path.isEmpty()) {
-        return;
-    }
-    QSettings().setValue(QStringLiteral("aitd/nameDb"), path);
-    if (selectorMode_ == SelectorMode::AitdBodies && !aitdPakPath_.isEmpty()) {
-        showAitdPakFile(aitdPakPath_); // re-label the open archive
-    }
-    QHash<int, QString> probe = aitdNames_;
-    statusBar()->showMessage(
-        probe.isEmpty()
-            ? tr("Name database loaded, but it has no entries for this archive.")
-            : tr("Name database loaded — %1 entries named.").arg(probe.size()),
-        6000);
 }
 
 QHash<int, QString> MainWindow::loadAitdNameDatabase(const QString& pakPath) {
@@ -1880,6 +1863,44 @@ void MainWindow::showAitdRoomsFile(const QString& path) {
             .arg(aitdBody_.bbox[0]).arg(aitdBody_.bbox[1])
             .arg(aitdBody_.bbox[2]).arg(aitdBody_.bbox[3])
             .arg(aitdBody_.bbox[4]).arg(aitdBody_.bbox[5]));
+}
+
+void MainWindow::showSoundCatalogue(const QString& path) {
+    stopAllPlayback();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        selectorMode_ = SelectorMode::None;
+        viewStack_->setCurrentWidget(placeholder_);
+        placeholder_->setText(tr("Cannot open:\n%1").arg(path));
+        return;
+    }
+    QByteArray blob = f.readAll();
+    f.close();
+
+    catalogueData_.assign(blob.constData(), blob.constData() + blob.size());
+    catalogue_ = m2audio::scanAiffCatalogue(catalogueData_.data(), catalogueData_.size());
+    if (catalogue_.empty()) {
+        selectorMode_ = SelectorMode::None;
+        viewStack_->setCurrentWidget(placeholder_);
+        placeholder_->setText(tr("No sounds found in:\n%1").arg(path));
+        return;
+    }
+
+    selectorMode_ = SelectorMode::SoundCatalogue;
+    cataloguePath_ = path;
+    textureSelect_->blockSignals(true);
+    textureSelect_->clear();
+    for (size_t i = 0; i < catalogue_.size(); ++i) {
+        textureSelect_->addItem(tr("Sound %1 (%2)")
+                                     .arg(i)
+                                     .arg(QLocale().formattedDataSize(
+                                         qint64(catalogue_[i].size), 1)));
+    }
+    textureSelect_->setCurrentIndex(0);
+    textureSelect_->blockSignals(false);
+    lodSelect_->clear();
+
+    refreshTexturePreview();
 }
 
 void MainWindow::showAitdImageFile(const QString& path) {
@@ -2214,6 +2235,56 @@ void MainWindow::refreshTexturePreview() {
         int frame = textureSelect_->currentIndex();
         if (frame >= 0 && size_t(frame) < animFrames_.size()) {
             displayImage(animFrames_[size_t(frame)]);
+        }
+        return;
+    }
+    if (selectorMode_ == SelectorMode::SoundCatalogue) {
+        int idx = textureSelect_->currentIndex();
+        if (idx < 0 || size_t(idx) >= catalogue_.size()) {
+            return;
+        }
+        const auto& e = catalogue_[size_t(idx)];
+        try {
+            m2audio::Aiff a =
+                m2audio::Aiff::load(catalogueData_.data() + e.offset, size_t(e.size));
+            pcm_ = a.decodePcm16();
+            pcmRate_ = int(a.sampleRate());
+            pcmChannels_ = int(a.channels());
+            waveformView_->setSamples(pcm_, pcmChannels_, double(pcmRate_));
+            viewStack_->setCurrentWidget(waveformView_);
+            playButton_->setEnabled(!pcm_.empty());
+            stopButton_->setEnabled(false);
+            playbackKind_ = PlaybackKind::Pcm;
+
+            double seconds = pcmRate_ > 0 && pcmChannels_ > 0
+                                  ? double(pcm_.size()) / pcmChannels_ / pcmRate_
+                                  : 0.0;
+            char tag[5] = {};
+            uint32_t fourcc = a.compressionFourcc();
+            for (int k = 0; k < 4; ++k) {
+                tag[k] = char((fourcc >> (24 - k * 8)) & 0xFF);
+            }
+            infoView_->setPlainText(
+                tr("File: %1\n\n3DO sound catalogue — %2 sounds\n\n"
+                   "Sound %3 of %2\nOffset: %4\nSize: %5 bytes\n"
+                   "Format: %6 Hz, %7, %8\nDuration: %9 s\n\n"
+                   "Each sound is a complete FORM/AIFF file, aligned to a "
+                   "2048-byte CD sector. Press Play to hear the selected "
+                   "one; Export Selected writes them all as WAV.")
+                    .arg(cataloguePath_)
+                    .arg(catalogue_.size())
+                    .arg(idx)
+                    .arg(e.offset)
+                    .arg(e.size)
+                    .arg(pcmRate_)
+                    .arg(pcmChannels_ == 1 ? tr("mono") : tr("stereo"))
+                    .arg(QString::fromLatin1(tag, 4).trimmed())
+                    .arg(seconds, 0, 'f', 2));
+        } catch (const std::exception& ex) {
+            viewStack_->setCurrentWidget(placeholder_);
+            placeholder_->setText(tr("Sound %1 could not be decoded:\n%2")
+                                       .arg(idx)
+                                       .arg(QString::fromUtf8(ex.what())));
         }
         return;
     }

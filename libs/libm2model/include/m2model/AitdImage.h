@@ -34,8 +34,15 @@ struct AitdImage {
 std::vector<AitdImage> parseAitdImages(const std::vector<uint8_t>& data);
 std::vector<AitdImage> loadAitdImages(const std::filesystem::path& path);
 
-// True if the blob's leading page header and size are consistent with the
-// layout above. Cheap enough for file-type sniffing.
-bool looksLikeAitdImage(const uint8_t* data, size_t size);
+// True if the leading page header, together with the file's total size, is
+// consistent with the layout above. Cheap enough for file-type sniffing.
+//
+// `header`/`headerSize` need only cover the first four bytes — the width
+// and height. `fileSize` is the size of the whole file, which is what
+// distinguishes a real page from four coincidental bytes. Keeping the two
+// separate matters: a sniffer reads a small header, not the file, and an
+// earlier signature that took only (data, size) silently rejected every
+// backdrop because the sniffer's 12-byte buffer could never satisfy it.
+bool looksLikeAitdImage(const uint8_t* header, size_t headerSize, uint64_t fileSize);
 
 } // namespace m2model

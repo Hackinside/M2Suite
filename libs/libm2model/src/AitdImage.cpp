@@ -8,7 +8,17 @@ namespace {
 
 constexpr size_t kHeader = 4;
 constexpr size_t kPalette = 768;
-constexpr size_t kPage = 65536; // .pics/.pad pad each page to 64 KiB
+// Pages are padded up to a 4 KiB boundary, not to a fixed page size. This
+// was originally hard-coded to 64 KiB because every AITD2 backdrop sampled
+// happened to be 320x200 (payload 64772, rounding to exactly 65536). It is
+// wrong the moment the dimensions differ: AITD1's camera00.pics is 240x200
+// (48772 -> 49152) and AITD2's camera01.pics is 320x250 (80772 -> 81920),
+// and both were rejected outright.
+constexpr uint64_t kPageAlign = 4096;
+
+uint64_t pageStride(uint64_t payload) {
+    return ((payload + kPageAlign - 1) / kPageAlign) * kPageAlign;
+}
 
 // Only 320x200 has ever been observed, but accept anything plausible so a
 // higher-resolution variant would still decode.
@@ -22,34 +32,36 @@ uint16_t rdU16(const uint8_t* p) {
 
 } // namespace
 
-bool looksLikeAitdImage(const uint8_t* data, size_t size) {
-    if (size < kHeader + kPalette + 64) {
+bool looksLikeAitdImage(const uint8_t* header, size_t headerSize, uint64_t fileSize) {
+    if (headerSize < kHeader || fileSize < kHeader + kPalette + 64) {
         return false;
     }
-    uint32_t w = rdU16(data);
-    uint32_t h = rdU16(data + 2);
+    uint32_t w = rdU16(header);
+    uint32_t h = rdU16(header + 2);
     if (!plausibleSize(w, h)) {
         return false;
     }
-    size_t need = kHeader + kPalette + size_t(w) * h;
-    // Either the file is exactly one un-padded page, or it is a whole
-    // number of 64 KiB pages that each have room for the payload.
-    if (size == need) {
+    uint64_t need = kHeader + kPalette + uint64_t(w) * h;
+    // Either the file is exactly one un-padded page (.bob), or it is a
+    // whole number of pages padded to the 4 KiB boundary (.pics/.pad).
+    if (fileSize == need) {
         return true;
     }
-    return need <= kPage && size % kPage == 0;
+    return fileSize % pageStride(need) == 0;
 }
 
 std::vector<AitdImage> parseAitdImages(const std::vector<uint8_t>& data) {
     std::vector<AitdImage> out;
-    if (!looksLikeAitdImage(data.data(), data.size())) {
+    if (!looksLikeAitdImage(data.data(), data.size(), data.size())) {
         return out;
     }
     uint32_t w = rdU16(data.data());
     uint32_t h = rdU16(data.data() + 2);
     size_t need = kHeader + kPalette + size_t(w) * h;
-    size_t stride = (data.size() == need) ? need : kPage;
-    size_t pages = data.size() / stride;
+    // The stride comes from the FIRST page's dimensions; every page in a
+    // file shares them, which is what makes a single stride correct.
+    size_t stride = (data.size() == need) ? need : size_t(pageStride(need));
+    size_t pages = stride ? data.size() / stride : 0;
 
     for (size_t p = 0; p < pages; ++p) {
         size_t base = p * stride;

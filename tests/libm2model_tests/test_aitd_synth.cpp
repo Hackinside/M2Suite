@@ -446,7 +446,7 @@ void testAitdImage() {
         page.push_back(uint8_t(i % 256));
     }
     CHECK(page.size() == 4 + 768 + size_t(W) * H);
-    CHECK(m2model::looksLikeAitdImage(page.data(), page.size()));
+    CHECK(m2model::looksLikeAitdImage(page.data(), page.size(), page.size()));
 
     auto imgs = m2model::parseAitdImages(page);
     CHECK(imgs.size() == 1);
@@ -466,9 +466,43 @@ void testAitdImage() {
     CHECK(multi.size() == 2);
     CHECK(multi[1].width == W && multi[1].height == H);
 
+    // Pages pad to a 4 KiB boundary, NOT to a fixed 64 KiB page. Every
+    // AITD2 backdrop first sampled happened to be 320x200, whose payload
+    // rounds to exactly 65536, which hid the real rule — and rejected
+    // AITD1's 240x200 and AITD2's 320x250 files outright. Two odd sizes
+    // here so the constant can't be hard-coded back.
+    struct Case { uint32_t w, h, stride; };
+    for (Case c : {Case{240, 200, 49152}, Case{320, 250, 81920}, Case{320, 200, 65536}}) {
+        const uint32_t payload = 4 + 768 + c.w * c.h;
+        CHECK(((payload + 4095) / 4096) * 4096 == c.stride);
+
+        std::vector<uint8_t> page;
+        put16(page, uint16_t(c.w));
+        put16(page, uint16_t(c.h));
+        for (int i = 0; i < 256; ++i) {
+            page.push_back(uint8_t(i));
+            page.push_back(uint8_t(255 - i));
+            page.push_back(uint8_t(i / 2));
+        }
+        for (uint32_t i = 0; i < c.w * c.h; ++i) {
+            page.push_back(uint8_t(i % 256));
+        }
+        CHECK(page.size() == payload);
+
+        std::vector<uint8_t> file;
+        for (int p = 0; p < 3; ++p) {
+            file.insert(file.end(), page.begin(), page.end());
+            file.resize(size_t(p + 1) * c.stride, 0);
+        }
+        CHECK(m2model::looksLikeAitdImage(file.data(), file.size(), file.size()));
+        auto pages = m2model::parseAitdImages(file);
+        CHECK(pages.size() == 3);
+        CHECK(pages[2].width == c.w && pages[2].height == c.h);
+    }
+
     // Garbage must be rejected rather than decoded into noise.
     std::vector<uint8_t> junk(70000, 0xAB);
-    CHECK(!m2model::looksLikeAitdImage(junk.data(), junk.size()));
+    CHECK(!m2model::looksLikeAitdImage(junk.data(), junk.size(), junk.size()));
     CHECK(m2model::parseAitdImages(junk).empty());
     std::printf("  backdrop pages decode (single + padded multi-page), junk rejected\n");
 }
