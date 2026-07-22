@@ -41,17 +41,15 @@ shown in their bind pose.
 This is a well-understood format with a working reference implementation
 (`fitd`) — it is work, not mystery.
 
-### 🔧 Room geometry and camera data are not displayed
+### 🔧 Camera zones are parsed but not drawn
 
-`ETAGE00..15.PAK` (floors/rooms) and `MASK00..15.PAK` (camera clipping
-masks) are recognised as AITD archives but have no viewer. Rooms are the
-more interesting target: they would let a whole location be reconstructed
-rather than isolated props.
+Room geometry now has a viewer — a floor's colliders and triggers assemble
+into a plan you can orbit and export. What is *not* drawn is the camera
+data: each room lists the camera IDs that cover it, and the second entry of
+each `ETAGE` archive holds those cameras' positions and view areas.
+AITD-roomviewer draws them, so this is transcription rather than research.
 
-[AITD-roomviewer](https://github.com/tigrouind/AITD-roomviewer) already
-does this and is the obvious starting point — this is work, not research.
-The name databases (see below) name every camera and room, so a viewer
-would come with labels for free.
+`MASK00..15.PAK` (camera clipping masks) are also still only listed.
 
 ### 🔧 `.16X` documents and `.ITD` tables are recognised but not read
 

@@ -4,6 +4,7 @@ add_library(libm2model STATIC
     src/AitdPalette.cpp
     src/AitdRender.cpp
     src/AitdImage.cpp
+    src/AitdRoom.cpp
     third_party/pak_explode.cpp
 )
 add_library(m2suite::libm2model ALIAS libm2model)

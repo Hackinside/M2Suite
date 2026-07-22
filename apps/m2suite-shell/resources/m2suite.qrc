@@ -4,4 +4,12 @@
         <file>logo.png</file>
         <file>mascot.png</file>
     </qresource>
+    <!-- Alone in the Dark entry-name databases, from AITD_PakEdit
+         (GPL-2.0-or-later, compatible with this project's GPL-3.0).
+         Bundling them is what makes archive entries show real names with
+         no setup at all; see THIRD_PARTY_LICENSES.md for attribution. -->
+    <qresource prefix="/aitd">
+        <file>aitd/AITD1_CD_PAK_DB.json</file>
+        <file>aitd/AITD1_floppy_PAK_DB.json</file>
+    </qresource>
 </RCC>

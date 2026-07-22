@@ -11,6 +11,7 @@
 #include "FileTypes.h"
 #include "m2model/AitdImage.h"
 #include "m2model/AitdPak.h"
+#include "m2model/AitdRoom.h"
 #include "m2stream/Stream.h"
 #include "m2texture/Texture.h"
 
@@ -56,6 +57,7 @@ private slots:
     void openFolder();
     void openSingleFile();
     void currentFileChanged(QTreeWidgetItem* current, QTreeWidgetItem* previous);
+    void expandArchiveItem(QTreeWidgetItem* item);
     void refreshTexturePreview();
     void applyTypeFilter();
     void exportSelected();
@@ -68,6 +70,7 @@ private slots:
     void showAboutDialog();
     void extractDiscImage();
     void convertImagesToUtf();
+    void convertAudioTo3do();
     void loadAitdNameDbDialog();
 
 private:
@@ -83,6 +86,7 @@ private:
     void showStreamFile(const QString& path);
     void showAitdPakFile(const QString& path);
     void showAitdImageFile(const QString& path);
+    void showAitdRoomsFile(const QString& path);
     void aitdTick();
     // Looks beside the PAK (and one level up) for an AITD_PakEdit-style
     // "*_PAK_DB.json" and returns entry-index -> name for this archive.
@@ -127,7 +131,7 @@ private:
 
     std::vector<m2texture::Texture> textures_;
     std::vector<QImage> animFrames_;
-    enum class SelectorMode { None, Textures, AnimFrames, AitdBodies };
+    enum class SelectorMode { None, Textures, AnimFrames, AitdBodies, AitdRooms };
     SelectorMode selectorMode_ = SelectorMode::None;
 
     // --- Playback state ---
@@ -165,6 +169,7 @@ private:
     QTimer* aitdTimer_ = nullptr;
     ModelViewport* modelView_ = nullptr;
     QHash<int, QString> aitdNames_; // entry index -> name, from a PAK_DB.json
+    std::vector<m2model::AitdRoom> aitdRooms_; // the open floor, if any
     // MPEG via Qt Multimedia on an extracted elementary stream
     QMediaPlayer* mediaPlayer_ = nullptr;
     QAudioOutput* mediaAudio_ = nullptr;

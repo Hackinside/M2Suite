@@ -17,9 +17,9 @@ preservation** project. It is not affiliated with, endorsed by, or connected
 to The 3DO Company, Panasonic, Konami, or any game publisher named anywhere
 in this repository.
 
-- **No game data is included or distributed.** M2Suite reads files you
-  already own. None are bundled, and none may be added — see
-  [Game data](#game-data).
+- **No game content ships in the application or in any release.** M2Suite
+  reads files you already own. The repository does carry a small, listed set
+  of minimal decoder samples for testing — see [Game data](#game-data).
 - **No SDK, firmware, or BIOS images are included or distributed.**
 - All trademarks and product names are the property of their respective
   owners and are used only to identify the formats and titles being
@@ -76,7 +76,23 @@ rather than creative expression — but the route is recorded for
 completeness. AITD_PakEdit is GPL-2.0, which is compatible with this
 project's GPL-3.0-or-later.
 
-## 4. Format knowledge from open-source implementations
+## 4. Bundled AITD name databases
+
+`apps/m2suite-shell/resources/aitd/AITD1_*_PAK_DB.json` are the entry-name
+databases from **AITD_PakEdit**, licensed **GPL-2.0-or-later** — compatible
+with this project's GPL-3.0. They are the community's accumulated
+identification work: which archive entry is Emily Hartwood, which backdrop
+is the 1st Floor Library.
+
+They are compiled into the executable so archive entries show real names
+with no setup. A database found beside the game, next to the executable, or
+chosen through *File > Load AITD Name Database* takes precedence, so an
+updated or extended database can be used without rebuilding.
+
+Credit to the AITD_PakEdit authors; see
+[docs/REFERENCES.md](docs/REFERENCES.md).
+
+## 5. Format knowledge from open-source implementations
 
 The AITD body and PAK layouts in `libm2model` were derived by **reading**
 `fitd`, AITD_PakEdit and AITD-tools — not by copying their code, apart from
@@ -88,7 +104,7 @@ including the one that turned out to be **wrong** for 3DO data (FFmpeg's
 `segafilm` audio assumption), because a corrected reference is as valuable
 as a confirmed one.
 
-## 5. Not currently in this repository
+## 6. Not currently in this repository
 
 - **`third_party/mame-ppc/`** — a PowerPC 602 CPU core and disassembler
   adapted from a MAME-derived Konami M2 emulator with no bundled licence
@@ -103,7 +119,7 @@ as a confirmed one.
 - **`Documents/`** — 3DO/Panasonic/ARM documentation PDFs, cited not
   redistributed.
 
-## 6. Bundled at release time
+## 7. Bundled at release time
 
 The portable package published under
 [Releases](https://github.com/Hackinside/M2Suite/releases) — and mirrored in
@@ -123,9 +139,30 @@ matching that release.
 
 ## Game data
 
-M2Suite ships **no game data**, and none may be added to this repository —
-not as fixtures, not as test files, not as issue attachments.
+M2Suite ships **no game content in the application or in any release**, and
+none may be attached to issues or pull requests.
 
-This is also why the test suite synthesises its own inputs: a test that
-requires copyrighted data is a test only one person can run. See
+**One exception, stated plainly:** `tests/fixtures/` contains a small set of
+sample files — about 1.5 MB total — used to verify the decoders against
+real-world data:
+
+| Fixture | Size | Format |
+|---|---|---|
+| `close.utf`, `roofs.utf` | 0.7 / 6 KB | M2 UTF textures |
+| `Message.cel` | 5 KB | 3DO cel |
+| `sample.anim` | 0.4 KB | 3DO ANIM |
+| `sample.aiff` | 6 KB | AIFF audio |
+| `sample.elf` | 1.5 KB | M2 PowerPC executable |
+| `sample.imag` | 150 KB | IMAG screen |
+| `sample.str`, `sample.stream` | 384 / 960 KB | DataStreamer movies |
+
+These are minimal excerpts kept for interoperability testing — the smallest
+inputs that exercise each decoder — not playable content, and not
+redistribution of any game. New fixtures should be avoided where a
+synthesised input will do; `tests/libm2model_tests/test_aitd_synth.cpp`
+builds its inputs byte by byte precisely so it needs no sample at all, and
+that is the pattern to follow.
+
+If you hold rights to any of these samples and would prefer they were not
+here, open an issue and they will be removed. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#testing).

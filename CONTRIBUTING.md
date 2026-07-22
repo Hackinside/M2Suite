@@ -12,6 +12,11 @@ Two rules override everything else on this page:
 > data, say so in the issue and we will work out how to reproduce it
 > without it.
 >
+> (The repository does carry a small set of minimal decoder samples under
+> `tests/fixtures/`, listed in
+> [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md#game-data). That set is
+> deliberate and reviewed — it is not an invitation to add more.)
+>
 > ### 2. Name the file
 > A format bug that cannot be tied to a specific file cannot be fixed.
 > Game, exact path inside the game, and file size. The **Copy Info** button
@@ -167,10 +172,12 @@ and what licence it carries.
 4. **Throw rather than guess.** If the parser does not understand
    something, raise `NotImplementedError`. Producing plausible-looking wrong
    output is worse than failing, because nobody notices.
-5. **Add a test, and make it self-contained.** Tests synthesise their
-   inputs or use small checked-in fixtures — never game data, because a
-   test only one person can run is not a test.
-   `tests/libm2model_tests/test_aitd_synth.cpp` is the model to follow.
+5. **Add a test, and prefer a synthesised input.** Build the bytes in the
+   test itself — `tests/libm2model_tests/test_aitd_synth.cpp` is the model
+   to follow. A test that needs a file only you have is a test only you can
+   run. `tests/fixtures/` holds a small set of existing samples (listed in
+   [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md#game-data)); adding to
+   it needs a reason that a synthesised input cannot meet.
 6. **Explain the *why* in comments, not the *what*.** The valuable comments
    in this tree record why a non-obvious approach was necessary — which
    assumption failed, which reference was wrong. Those are what stop a

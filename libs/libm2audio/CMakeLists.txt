@@ -2,6 +2,7 @@ add_library(libm2audio STATIC
     src/Aiff.cpp
     src/Wav.cpp
     src/Sdx2.cpp
+    src/Encoder.cpp
 )
 add_library(m2suite::libm2audio ALIAS libm2audio)
 

@@ -23,6 +23,11 @@ target_link_libraries(libm2audio_tests PRIVATE m2suite::libm2audio)
 add_test(NAME libm2audio_tests
          COMMAND libm2audio_tests ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sample.aiff)
 
+# Encoder round-trips: synthesises its own signal, so no fixture needed.
+add_executable(libm2audio_encoder_tests libm2audio_tests/test_encoder.cpp)
+target_link_libraries(libm2audio_encoder_tests PRIVATE m2suite::libm2audio)
+add_test(NAME libm2audio_encoder_tests COMMAND libm2audio_encoder_tests)
+
 add_executable(libm2disasm_tests libm2disasm_tests/test_elf_disasm.cpp)
 target_link_libraries(libm2disasm_tests PRIVATE m2suite::libm2disasm)
 add_test(NAME libm2disasm_tests

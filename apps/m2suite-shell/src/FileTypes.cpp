@@ -187,6 +187,16 @@ FileType sniffFileType(const QString& path) {
         if (tagIs(buf, "PEBM")) return FileType::Pebm;
         if (tagIs(buf, "M1VC")) return FileType::M1vc;
     }
+    // 3DO resource bundle. Files with an .AIFF extension are sometimes
+    // actually these (Road Rash's Rash.AIFF holds 19 sounds), so the magic
+    // has to win over the extension.
+    if (n >= 4 && tagIs(buf, "RSRC")) {
+        return FileType::RsrcBundle;
+    }
+    // 3DO disc banner screen: a length byte then the 'APPSCRN' tag.
+    if (n >= 8 && std::memcmp(buf + 1, "APPSCRN", 7) == 0) {
+        return FileType::Banner;
+    }
 
     // --- Alone in the Dark ------------------------------------------------
     // AITD backdrops (.pics/.bob/.pad) are raw paletted pages with no magic,
@@ -214,17 +224,54 @@ FileType sniffFileType(const QString& path) {
     // name consulted, as a cheap shortcut past the decompression probe.
     if (looksLikeAitdPakTable(path, buf, n)) {
         QString base = path.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1).toUpper();
-        if (base.endsWith(QStringLiteral(".PAK")) &&
-            (base.contains(QStringLiteral("LSTBODY")) ||
-             base.contains(QStringLiteral("LISTBODY")) ||
-             base.contains(QStringLiteral("LISTBOD2")))) {
-            return FileType::AitdPak;
+        // The name only classifies a file whose offset table already
+        // validated, and only when it really is a .PAK — that ordering is
+        // what stopped exported models being claimed as archives.
+        if (base.endsWith(QStringLiteral(".PAK"))) {
+            if (base.contains(QStringLiteral("LSTBODY")) ||
+                base.contains(QStringLiteral("LISTBODY")) ||
+                base.contains(QStringLiteral("LISTBOD2"))) {
+                return FileType::AitdPak;
+            }
+            if (base.startsWith(QStringLiteral("ETAGE"))) {
+                return FileType::AitdRooms;
+            }
+            if (base.startsWith(QStringLiteral("MASK")) ||
+                base.startsWith(QStringLiteral("NASK"))) { // NASK11: a typo on disc
+                return FileType::AitdMaskPak;
+            }
+            if (base.contains(QStringLiteral("LSTANIM")) ||
+                base.contains(QStringLiteral("LISTANI")) ||
+                base.startsWith(QStringLiteral("ANIM"))) {
+                return FileType::AitdAnimPak;
+            }
+            if (base.contains(QStringLiteral("LISTSAMP")) ||
+                base.contains(QStringLiteral("SAMP"))) {
+                return FileType::AitdSoundPak;
+            }
+            if (base.contains(QStringLiteral("LSTLIFE")) ||
+                base.contains(QStringLiteral("LSTTRAK")) ||
+                base.contains(QStringLiteral("LSTMAT")) ||
+                base.contains(QStringLiteral("LSTHYB")) ||
+                base.contains(QStringLiteral("LISTLIFE")) ||
+                base.contains(QStringLiteral("LISTTRAK"))) {
+                return FileType::AitdScript;
+            }
         }
         // Probing costs a few decompressions, so it runs only once the
         // offset table has already been validated against the real file
         // size — that gate rejects essentially everything that merely
         // happens to start with four zero bytes.
         return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
+    }
+
+    // 3DO M1 ARM executables have no magic. They begin with an ARM branch
+    // or a MOV at the entry point; the reliable tell across the discs
+    // sampled is the 0xE1/0xEA/0xEB condition-and-opcode byte in the top
+    // byte of the first little-endian word, plus no extension.
+    if (n >= 8 && (ubuf[3] == 0xE1 || ubuf[3] == 0xEA || ubuf[3] == 0xEB) &&
+        !path.section(QLatin1Char('/'), -1).contains(QLatin1Char('.'))) {
+        return FileType::ArmExecutable;
     }
 
     // Extension fallback for files whose magic didn't match (or short files).
@@ -262,6 +309,21 @@ FileType sniffFileType(const QString& path) {
         lower.endsWith(QStringLiteral(".bmp"))) {
         return FileType::StandardImage;
     }
+    // AITD odds and ends: backdrops that failed the structural check (a
+    // truncated rip, say) are still worth labelling by extension.
+    if (lower.endsWith(QStringLiteral(".pics")) || lower.endsWith(QStringLiteral(".bob")) ||
+        lower.endsWith(QStringLiteral(".pad"))) {
+        return FileType::AitdImage;
+    }
+    if (lower.endsWith(QStringLiteral(".stk")) || lower.endsWith(QStringLiteral(".txt"))) {
+        return FileType::TextFile;
+    }
+    {
+        QString base = path.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1).toUpper();
+        if (base.startsWith(QStringLiteral("SAV"))) {
+            return FileType::AitdSave;
+        }
+    }
     return FileType::Unknown;
 }
 
@@ -285,14 +347,125 @@ QString fileTypeLabel(FileType type) {
         case FileType::Elf: return QStringLiteral("Executable (ELF)");
         case FileType::FilmFile: return QStringLiteral("Film (Cinepak)");
         case FileType::AitdPak: return QStringLiteral("3D models (AITD PAK)");
+        case FileType::AitdRooms: return QStringLiteral("Rooms (AITD ETAGE)");
         case FileType::AitdImage: return QStringLiteral("Backdrop (AITD)");
         case FileType::AitdArchive: return QStringLiteral("Archive (AITD PAK)");
+        case FileType::AitdAnimPak: return QStringLiteral("Animations (AITD PAK)");
+        case FileType::AitdMaskPak: return QStringLiteral("Camera masks (AITD PAK)");
+        case FileType::AitdSoundPak: return QStringLiteral("Sound archive (AITD PAK)");
         case FileType::AitdPages: return QStringLiteral("Document (AITD PAGES)");
         case FileType::AitdData: return QStringLiteral("Engine data (AITD ITD)");
+        case FileType::AitdScript: return QStringLiteral("Scripts (AITD PAK)");
+        case FileType::AitdSave: return QStringLiteral("Save game (AITD)");
+        case FileType::RsrcBundle: return QStringLiteral("Resource bundle (RSRC)");
+        case FileType::Banner: return QStringLiteral("Banner screen (APPSCRN)");
+        case FileType::ArmExecutable: return QStringLiteral("Executable (ARM, M1)");
+        case FileType::TextFile: return QStringLiteral("Text");
         case FileType::ExportedModel: return QStringLiteral("Exported model");
         case FileType::Unknown: return QStringLiteral("Unknown");
     }
     return QStringLiteral("Unknown");
+}
+
+FileCategory fileTypeCategory(FileType type) {
+    switch (type) {
+        case FileType::UtfTexture:
+            return FileCategory::Textures;
+
+        case FileType::Cel:
+        case FileType::Imag:
+        case FileType::StandardImage:
+        case FileType::Pebm:
+        case FileType::AitdImage:
+        case FileType::Banner:
+            return FileCategory::Images;
+
+        case FileType::Anim:
+            return FileCategory::Animation;
+
+        case FileType::StreamFile:
+        case FileType::FilmFile:
+        case FileType::M1vc:
+            return FileCategory::Video;
+
+        case FileType::Aiff:
+        case FileType::Aifc:
+        case FileType::Wav:
+        case FileType::RsrcBundle:
+        case FileType::Instrument:
+            return FileCategory::Audio;
+
+        case FileType::AitdPak:
+        case FileType::AitdRooms:
+        case FileType::ExportedModel:
+            return FileCategory::Models3D;
+
+        case FileType::AitdArchive:
+        case FileType::AitdAnimPak:
+        case FileType::AitdMaskPak:
+        case FileType::AitdSoundPak:
+            return FileCategory::Archives;
+
+        case FileType::Elf:
+        case FileType::ArmExecutable:
+            return FileCategory::Executables;
+
+        case FileType::Font:
+        case FileType::Ddf:
+        case FileType::Intl:
+        case FileType::AitdPages:
+        case FileType::AitdData:
+        case FileType::AitdScript:
+        case FileType::AitdSave:
+        case FileType::TextFile:
+            return FileCategory::Data;
+
+        case FileType::Unknown:
+            return FileCategory::Unrecognised;
+    }
+    return FileCategory::Unrecognised;
+}
+
+QString fileCategoryLabel(FileCategory category) {
+    switch (category) {
+        case FileCategory::All: return QStringLiteral("All types");
+        case FileCategory::Textures: return QStringLiteral("Textures");
+        case FileCategory::Images: return QStringLiteral("Images");
+        case FileCategory::Animation: return QStringLiteral("Animation");
+        case FileCategory::Video: return QStringLiteral("Video & streams");
+        case FileCategory::Audio: return QStringLiteral("Audio");
+        case FileCategory::Models3D: return QStringLiteral("3D models & rooms");
+        case FileCategory::Archives: return QStringLiteral("Archives");
+        case FileCategory::Executables: return QStringLiteral("Executables");
+        case FileCategory::Data: return QStringLiteral("Data & documents");
+        case FileCategory::Unrecognised: return QStringLiteral("Unrecognised");
+    }
+    return QStringLiteral("All types");
+}
+
+const QList<FileCategory>& fileCategoryOrder() {
+    static const QList<FileCategory> order{
+        FileCategory::All,        FileCategory::Textures,    FileCategory::Images,
+        FileCategory::Animation,  FileCategory::Video,       FileCategory::Audio,
+        FileCategory::Models3D,   FileCategory::Archives,    FileCategory::Executables,
+        FileCategory::Data,       FileCategory::Unrecognised,
+    };
+    return order;
+}
+
+bool isAitdArchiveType(FileType type) {
+    switch (type) {
+        case FileType::AitdPak:
+        case FileType::AitdRooms:
+        case FileType::AitdArchive:
+        case FileType::AitdAnimPak:
+        case FileType::AitdMaskPak:
+        case FileType::AitdSoundPak:
+        case FileType::AitdScript:
+            return true;
+        default:
+            return false;
+    }
 }
 
 bool fileTypeHasPreview(FileType type) {
@@ -309,6 +482,12 @@ bool fileTypeHasPreview(FileType type) {
         case FileType::FilmFile:   // standalone Cinepak film
         case FileType::AitdImage:  // paletted backdrop pages
         case FileType::AitdPak:    // interactive 3D model view
+        case FileType::AitdRooms:  // room archives, browsed the same way
+        case FileType::AitdArchive:
+        case FileType::AitdAnimPak:
+        case FileType::AitdMaskPak:
+        case FileType::AitdSoundPak:
+        case FileType::AitdScript:
         case FileType::Elf:        // disassembly view
         case FileType::M1vc:       // MPEG video in a TAG0 container
         case FileType::Ddf:        // IFF FORM shown as structured text

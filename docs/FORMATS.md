@@ -202,6 +202,36 @@ of `Aiff::load` and unwraps to the first `AIFF` resource.
 
 ## Audio codecs
 
+### Encoding, not just decoding
+
+M2Suite writes these formats as well as reading them, for asset replacement
+and translation work. Two things are worth recording.
+
+**"Bitrate" is not a free parameter.** Every 3DO codec is a fixed-ratio
+scheme with no quality knob, so the bitrate falls out of
+`sampleRate × channels × bitsPerSample` — 16, 8 or 4 bits. A UI that offers
+a bitrate slider is lying about what the format can do; M2Suite reports the
+resulting rate instead.
+
+**The delta codecs must be encoded against their own decoder.** SDX2, SQS2
+and CBD2 each carry per-channel history, so an encoder that disagrees with
+the decoder by one LSB does not sound *slightly* wrong — the error
+compounds and the file audibly drifts. The encoder here searches both the
+"exact" (even byte, history discarded) and "delta" (odd byte) forms for
+every sample and keeps whichever lands closer, which also stops error
+accumulating when a signal moves faster than the delta table can follow.
+
+Measured round-trip error against a 440 Hz tone with deliberate transients:
+
+| Codec | Ratio | RMS error (of 32000 full scale) |
+|---|---|---|
+| SDX2 | 2:1 | 41 (0.13%) |
+| CBD2 | 2:1 | 33 (0.10%) |
+| ADP4 | 4:1 | 1337 (4.2%) |
+
+**Container rule:** AIFF has no compression tag, so anything other than PCM
+needs AIFC — and an AIFC must carry an `FVER` chunk before its `COMM`.
+
 3DO AIFF/AIFC files use several proprietary codecs identified by the
 compression tag in the `COMM` chunk.
 
@@ -577,6 +607,55 @@ which is the exact byte size of `CAM8003.BOB`. That is not a coincidence,
 and it confirms the palette size and pixel depth in one step. Decoded output
 was then visually checked: recognisable AITD 2 rooms (the tree and mansion
 exterior, the cellar stairs, the attic bedroom).
+
+### Rooms and floors — `ETAGE*.PAK`
+
+**Finding (verified).** AITD's visuals are the pre-rendered backdrops, so a
+"room" stores no mesh. What it stores is a set of axis-aligned boxes:
+**colliders** the player walks on and bumps into, and **triggers** that fire
+scripts. Reassembled, they give a floor's true layout and scale.
+
+Every room of a floor lives in the archive's **first entry**, behind a `u32`
+offset table; the second entry is camera data. (A later engine revision put
+one room per entry — AITD-roomviewer switches on the entry count. Both 3DO
+builds use the table form, with exactly two entries per archive.)
+
+```
+entry 0:
+  u32 roomOffsets[]     offsets[0] is BOTH the table size and the first
+                        room's offset — the rooms begin immediately after
+                        the table. A zero or out-of-range slot ends the list.
+
+per room, relative to its offset:
+  u16 colliderOffset    @ 0    relative to the ROOM, not the entry
+  u16 triggerOffset     @ 2
+  s16 position[3]       @ 4    room origin; multiply by 10 for engine units
+  u16 cameraCount       @ 10
+  u16 cameraIds[n]      @ 12
+
+at colliderOffset (and likewise at triggerOffset):
+  u16 count
+  count x 16 bytes:
+    s16 lowerX, upperX, lowerY, upperY, lowerZ, upperZ
+    s16 id      @ 12
+    u16 flags   @ 14
+```
+
+Collider flags: `0x02` underground floor, `0x04` link to another room,
+`0x08` interactive.
+
+**Two traps.** The box-list offsets are relative to *the room*, not to the
+entry — using entry-relative offsets yields zero rooms rather than wrong
+ones, which at least fails loudly. And the room position is in units ten
+times coarser than the box coordinates, so a floor assembled without the
+×10 collapses into a heap.
+
+Verified against both 3DO games; AITD1's eight floors yield 1–14 rooms each
+(ETAGE03: 14 rooms, 178 colliders, 43 triggers, 72 cameras) and render as a
+recognisable Derceto floor plan.
+
+Derived from tigrouind's [AITD-roomviewer](https://github.com/tigrouind/AITD-roomviewer)
+(`RoomLoader.cs`).
 
 ### Palette
 

@@ -2,6 +2,79 @@
 
 ## Unreleased
 
+### Stage viewer — AITD rooms and floors
+
+- **`ETAGE*.PAK` floors open in the 3D viewport.** A floor's rooms assemble
+  into one plan you can orbit, zoom and export as `.obj` + `.mtl`. Grey is
+  walkable floor, blue a link to another room, deep blue an interactive box,
+  red a script trigger. Colliders show by default; the frame selector adds
+  triggers, which are tall volumes that would otherwise hide the layout from
+  above.
+- AITD's visuals are the pre-rendered backdrops, so a room stores no mesh —
+  what it stores is collision volumes, and that is what this reconstructs.
+  Verified across both games: AITD1's ETAGE03 gives 14 rooms, 178 colliders
+  and 43 triggers, and renders as a recognisable Derceto floor plan.
+  Layout in [docs/FORMATS.md](docs/FORMATS.md#rooms-and-floors--etagepak),
+  built from tigrouind's AITD-roomviewer.
+
+### Audio encoding — write 3DO formats, not just read them
+
+- **New: File > Convert Audio to 3DO Format.** Encodes WAV/AIFF/AIFC into
+  SDX2, SQS2, CBD2, ADP4 or PCM, with mode (mono/stereo), sample rate and
+  container, and a live description and bitrate for whatever is selected.
+  SDX2 at 22050 Hz mono is preselected — what shipping 3DO titles actually
+  used, and what the FILM/DataStreamer audio path expects.
+- Bitrate is reported rather than offered as a slider: every 3DO codec is a
+  fixed-ratio scheme, so the rate follows from sample rate x channels x
+  bits. A bitrate control would be lying about the format.
+- The delta codecs are encoded against their own decoder, searching both
+  the exact and delta forms per sample. They carry per-channel history, so
+  an encoder that disagrees with the decoder by one LSB drifts audibly
+  rather than sounding slightly off. Round-trip RMS error: SDX2 0.13%,
+  CBD2 0.10%, ADP4 4.2%.
+
+### File recognition and filters
+
+- **Recognition rebuilt around categories.** The filter list is now
+  generated from the type table, so a new format appears under the right
+  heading automatically. The old hand-maintained switch over combo-box
+  indices had silently dropped every type added after it was written.
+  Filters: Textures, Images, Animation, Video & streams, Audio, 3D models &
+  rooms, Archives, Executables, Data & documents, Unrecognised.
+- AITD archives are now told apart by role — models, rooms, animations,
+  camera masks, sound archives, scripts — instead of one "Archive" bucket.
+- Newly recognised: `RSRC` resource bundles, `APPSCRN` banner screens, 3DO
+  M1 ARM executables, `.16X` documents, `.ITD` engine tables, `.STK` string
+  tables, save games, and `.obj`/`.ply`/`.mtl`/`.gltf` export output.
+
+### Browsing AITD archives
+
+- **Archives expand in the file pane.** Any AITD PAK now opens in the tree
+  to show its entries, each labelled with its real name and whether it holds
+  geometry. Selecting an entry jumps straight to it. Expansion is lazy — a
+  folder of AITD PAKs holds thousands of entries, and opening them during a
+  scan would make browsing crawl.
+- **Names work with no setup.** The AITD_PakEdit name databases are bundled
+  (GPL-2.0-or-later, compatible with this project — see
+  [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)), so entries read
+  "12 — Emily" out of the box. A database beside the game, next to the
+  executable, or chosen via File > Load AITD Name Database still takes
+  precedence.
+
+### CI
+
+- **Both jobs were failing; both are fixed.** The game-data tripwire was
+  matching the project's own `tests/fixtures/`, and the build job depended
+  on a third-party MSVC-setup action and on `windows-latest` continuing to
+  ship the Visual Studio version the preset asks for by name. The tripwire
+  now exempts the reviewed fixture set, and the build job is pinned to
+  `windows-2022` with no external action — the preset's Visual Studio
+  generator locates the toolchain itself.
+- `THIRD_PARTY_LICENSES.md` and `CONTRIBUTING.md` now state the fixture
+  position honestly: the repo does carry ~1.5 MB of minimal decoder samples,
+  they are listed, and synthesised inputs are the preferred pattern for
+  anything new.
+
 ### Alone in the Dark — models now render correctly
 
 - **Bone groups are resolved.** This was the big one. An animated AITD body

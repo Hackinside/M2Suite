@@ -21,6 +21,7 @@
 
 #include "m2model/AitdImage.h"
 #include "m2model/AitdPak.h"
+#include "m2model/AitdRoom.h"
 
 #define CHECK(cond)                                                             \
     do {                                                                        \
@@ -343,6 +344,93 @@ void testObjExport() {
     std::printf("  OBJ export emits geometry, materials and an mtllib line\n");
 }
 
+void testAitdRooms() {
+    // One room: a header at an offset from a u32 table, with the collider
+    // and trigger offsets relative to the room rather than the entry —
+    // that relative-to-the-room detail is the whole trap here, and getting
+    // it wrong yields zero rooms rather than wrong ones.
+    std::vector<uint8_t> d;
+    auto put32 = [&](uint32_t v) {
+        d.push_back(uint8_t(v));
+        d.push_back(uint8_t(v >> 8));
+        d.push_back(uint8_t(v >> 16));
+        d.push_back(uint8_t(v >> 24));
+    };
+    // offsets[0] is both the table size and the first room's offset — the
+    // rooms start immediately after the table, exactly as the PAK's own
+    // offset table works. A zero slot ends the list.
+    put32(8); // 2 slots; the first room begins at byte 8
+    put32(0); // terminator
+
+    const uint32_t roomAt = uint32_t(d.size());
+    CHECK(roomAt == 8);
+
+    // Room header. Collider list at +20, trigger list at +58 (relative).
+    put16(d, 20);                  // colliderOffset
+    put16(d, 58);                  // triggerOffset
+    put16(d, uint16_t(int16_t(100)));  // position x
+    put16(d, uint16_t(int16_t(-50)));  // position y
+    put16(d, uint16_t(int16_t(25)));   // position z
+    put16(d, 2);                   // camera count
+    put16(d, 7);                   // camera ids
+    put16(d, 9);
+    while (d.size() < roomAt + 20) {
+        d.push_back(0);
+    }
+
+    // Two colliders: a plain floor and a room link.
+    put16(d, 2);
+    for (int k = 0; k < 2; ++k) {
+        put16(d, uint16_t(int16_t(-10)));  // lower x
+        put16(d, uint16_t(int16_t(10)));   // upper x
+        put16(d, uint16_t(int16_t(0)));    // lower y
+        put16(d, uint16_t(int16_t(20)));   // upper y
+        put16(d, uint16_t(int16_t(-30)));  // lower z
+        put16(d, uint16_t(int16_t(30)));   // upper z
+        put16(d, uint16_t(int16_t(k)));    // id
+        put16(d, k == 1 ? 4 : 0);          // flags: 4 = room link
+    }
+    while (d.size() < roomAt + 58) {
+        d.push_back(0);
+    }
+    // One trigger.
+    put16(d, 1);
+    for (int a = 0; a < 6; ++a) {
+        put16(d, uint16_t(int16_t(a * 5)));
+    }
+    put16(d, 42); // id
+    put16(d, 0);  // flags
+
+    std::vector<m2model::AitdRoom> rooms = m2model::parseAitdRoomArchive(d);
+    CHECK(rooms.size() == 1);
+    const m2model::AitdRoom& r = rooms[0];
+    CHECK(r.valid);
+    CHECK(r.position[0] == 100 && r.position[1] == -50 && r.position[2] == 25);
+    CHECK(r.cameraIds.size() == 2 && r.cameraIds[0] == 7 && r.cameraIds[1] == 9);
+    CHECK(r.colliders.size() == 2);
+    CHECK(r.triggers.size() == 1);
+    CHECK(r.colliders[0].lower[0] == -10 && r.colliders[0].upper[2] == 30);
+    CHECK(!r.colliders[0].roomLink());
+    CHECK(r.colliders[1].roomLink());
+    CHECK(r.triggers[0].id == 42);
+
+    // Colliders only: 2 boxes x 6 faces, 8 vertices each.
+    m2model::AitdBody floorOnly = m2model::buildRoomBody(rooms, false);
+    CHECK(floorOnly.valid);
+    CHECK(floorOnly.vertexCount() == 16);
+    CHECK(floorOnly.primitives.size() == 12);
+    // Boxes are offset by the room position, which is scaled by 10.
+    CHECK(floorOnly.bbox[0] == -10 + 1000);
+
+    m2model::AitdBody withTriggers = m2model::buildRoomBody(rooms, true);
+    CHECK(withTriggers.primitives.size() == 18); // three boxes now
+
+    // Garbage must yield no rooms rather than noise.
+    std::vector<uint8_t> junk(256, 0x5A);
+    CHECK(m2model::parseAitdRoomArchive(junk).empty());
+    std::printf("  ETAGE rooms parse (offset table, room-relative box lists)\n");
+}
+
 void testAitdImage() {
     const uint32_t W = 320, H = 200;
     // One un-padded page: 4 + 768 + W*H.
@@ -395,6 +483,7 @@ int main() {
     testRenderCentresOnDrawnGeometry();
     testRenderKeepsSizeWhileOrbiting();
     testObjExport();
+    testAitdRooms();
     testAitdImage();
     std::printf("all AITD synth tests passed\n");
     return 0;

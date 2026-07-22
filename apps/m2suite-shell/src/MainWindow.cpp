@@ -26,6 +26,7 @@
 #include <QDate>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QFrame>
 #include <QLocale>
 #include <QMediaPlayer>
@@ -58,6 +59,7 @@
 #include "ModelViewport.h"
 #include "WaveformView.h"
 #include "m2audio/Aiff.h"
+#include "m2audio/Encoder.h"
 #include "m2audio/Sdx2.h"
 #include "m2audio/Wav.h"
 #include "m2cel/Anim.h"
@@ -74,6 +76,11 @@ namespace m2suite {
 namespace {
 constexpr int kPathRole = Qt::UserRole;
 constexpr int kTypeRole = Qt::UserRole + 1;
+// Set on a child item that stands for one entry inside an archive.
+constexpr int kEntryRole = Qt::UserRole + 2;
+// Marks the stand-in child that gives an archive its expander arrow; it is
+// replaced by the real entries the first time the archive is expanded.
+constexpr int kPlaceholderRole = Qt::UserRole + 3;
 constexpr uint32_t kFourccSDX2 = ('S' << 24) | ('D' << 16) | ('X' << 8) | '2';
 constexpr uint32_t kFourccCBD2 = ('C' << 24) | ('B' << 16) | ('D' << 8) | '2';
 constexpr uint32_t kFourccNONE = ('N' << 24) | ('O' << 16) | ('N' << 8) | 'E';
@@ -187,29 +194,17 @@ QString fourccToString(uint32_t v) {
     return s;
 }
 
+// The filter combo is generated from fileCategoryOrder(), so a new
+// FileType only has to be slotted into fileTypeCategory() to appear under
+// the right heading. The previous hand-maintained switch over combo
+// indices silently dropped every type added after it was written.
 bool typeMatchesFilter(FileType type, int filterIndex) {
-    switch (filterIndex) {
-        case 0: return true;
-        case 1: return type == FileType::UtfTexture;
-        case 2:
-            return type == FileType::Cel || type == FileType::Anim ||
-                   type == FileType::Imag || type == FileType::StandardImage ||
-                   type == FileType::AitdImage;
-        case 3:
-            return type == FileType::Aiff || type == FileType::Aifc ||
-                   type == FileType::Wav;
-        case 4:
-            return type == FileType::StreamFile || type == FileType::FilmFile ||
-                   type == FileType::M1vc;
-        case 5: return type == FileType::AitdPak; // 3D models
-        case 6:
-            return type == FileType::Instrument || type == FileType::Font ||
-                   type == FileType::Ddf || type == FileType::Intl ||
-                   type == FileType::Pebm || type == FileType::Elf ||
-                   type == FileType::AitdArchive || type == FileType::AitdPages ||
-                   type == FileType::AitdData || type == FileType::ExportedModel;
-        default: return true;
+    const auto& order = fileCategoryOrder();
+    if (filterIndex < 0 || filterIndex >= order.size()) {
+        return true;
     }
+    FileCategory want = order.at(filterIndex);
+    return want == FileCategory::All || fileTypeCategory(type) == want;
 }
 } // namespace
 
@@ -228,6 +223,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(extractDiscAction, &QAction::triggered, this, &MainWindow::extractDiscImage);
     auto* toUtfAction = fileMenu->addAction(tr("Convert Images to &UTF Texture..."));
     connect(toUtfAction, &QAction::triggered, this, &MainWindow::convertImagesToUtf);
+    auto* toAudioAction = fileMenu->addAction(tr("Convert &Audio to 3DO Format..."));
+    connect(toAudioAction, &QAction::triggered, this, &MainWindow::convertAudioTo3do);
     auto* nameDbAction = fileMenu->addAction(tr("Load AITD &Name Database..."));
     nameDbAction->setToolTip(tr("An AITD_PakEdit *PAK_DB.json, to label archive "
                                  "entries with their real names"));
@@ -266,10 +263,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     // --- Left dock: type filter + file tree + export button ---
     typeFilter_ = new QComboBox;
-    typeFilter_->addItems({tr("All types"), tr("Textures (UTF)"),
-                            tr("Images & animations"), tr("Audio"),
-                            tr("Video / streams / films"), tr("3D models (AITD)"),
-                            tr("Other recognized")});
+    for (FileCategory c : fileCategoryOrder()) {
+        typeFilter_->addItem(fileCategoryLabel(c));
+    }
     connect(typeFilter_, &QComboBox::currentIndexChanged, this, &MainWindow::applyTypeFilter);
 
     fileTree_ = new QTreeWidget;
@@ -279,6 +275,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     fileTree_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     fileTree_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(fileTree_, &QTreeWidget::currentItemChanged, this, &MainWindow::currentFileChanged);
+    connect(fileTree_, &QTreeWidget::itemExpanded, this, &MainWindow::expandArchiveItem);
     connect(fileTree_, &QTreeWidget::customContextMenuRequested, this,
             &MainWindow::fileTreeContextMenu);
 
@@ -753,6 +750,15 @@ void MainWindow::scanFolderIntoTree(const QString& rootPathIn) {
             item->setForeground(0, QBrush(QColor(150, 150, 150)));
             item->setForeground(1, QBrush(QColor(150, 150, 150)));
         }
+        if (isAitdArchiveType(type)) {
+            // Give the archive an expander without paying to open it during
+            // the scan — a folder of AITD PAKs holds thousands of entries,
+            // and decompressing them all here would make browsing crawl.
+            auto* placeholder = new TreeItem(item);
+            placeholder->setData(0, kPlaceholderRole, true);
+            placeholder->setText(0, tr("(expand to list entries)"));
+            placeholder->setForeground(0, QBrush(QColor(150, 150, 150)));
+        }
         ++found;
     }
     progress.reset();
@@ -774,10 +780,20 @@ void MainWindow::scanFolderIntoTree(const QString& rootPathIn) {
 void MainWindow::applyTypeFilter() {
     int filterIndex = typeFilter_->currentIndex();
     std::function<bool(QTreeWidgetItem*)> filterItem = [&](QTreeWidgetItem* item) -> bool {
+        // Archive entries inherit their archive's visibility: filtering a
+        // model archive out but leaving its models behind would be
+        // nonsense, and the entries carry the archive's own type anyway.
+        if (item->data(0, kEntryRole).isValid() ||
+            item->data(0, kPlaceholderRole).isValid()) {
+            item->setHidden(false);
+            return true;
+        }
         QVariant typeVar = item->data(0, kTypeRole);
         if (typeVar.isValid()) {
             bool visible = typeMatchesFilter(FileType(typeVar.toInt()), filterIndex);
             item->setHidden(!visible);
+            // Hiding a parent hides its children implicitly, so there is no
+            // need to walk into an archive that is itself filtered out.
             return visible;
         }
         bool anyVisible = false;
@@ -798,6 +814,20 @@ void MainWindow::currentFileChanged(QTreeWidgetItem* current, QTreeWidgetItem*) 
     if (!current) {
         return;
     }
+    // An archive entry: open its archive (if it isn't already) and jump
+    // straight to that entry.
+    QVariant entryVar = current->data(0, kEntryRole);
+    if (entryVar.isValid()) {
+        QString archivePath = current->data(0, kPathRole).toString();
+        if (aitdPakPath_ != archivePath || selectorMode_ != SelectorMode::AitdBodies) {
+            openPath(archivePath, FileType(current->data(0, kTypeRole).toInt()));
+        }
+        int entry = entryVar.toInt();
+        if (entry >= 0 && entry < textureSelect_->count()) {
+            textureSelect_->setCurrentIndex(entry);
+        }
+        return;
+    }
     QVariant typeVar = current->data(0, kTypeRole);
     if (!typeVar.isValid()) {
         return;
@@ -806,6 +836,54 @@ void MainWindow::currentFileChanged(QTreeWidgetItem* current, QTreeWidgetItem*) 
     if (autoplayCheck_->isChecked() && playButton_->isEnabled()) {
         playClicked();
     }
+}
+
+void MainWindow::expandArchiveItem(QTreeWidgetItem* item) {
+    if (!item || item->childCount() != 1 ||
+        !item->child(0)->data(0, kPlaceholderRole).isValid()) {
+        return; // not an unexpanded archive
+    }
+    QVariant typeVar = item->data(0, kTypeRole);
+    if (!typeVar.isValid()) {
+        return;
+    }
+    FileType type = FileType(typeVar.toInt());
+    QString path = item->data(0, kPathRole).toString();
+
+    delete item->takeChild(0);
+
+    QGuiApplication::setOverrideCursor(Qt::WaitCursor);
+    QHash<int, QString> names = loadAitdNameDatabase(path);
+    try {
+        m2model::AitdPak pak = m2model::AitdPak::openFromFile(path.toStdWString());
+        for (size_t i = 0; i < pak.entryCount(); ++i) {
+            std::vector<uint8_t> raw = pak.read(i);
+            m2model::AitdBody body = m2model::parseAitdBody(raw);
+            bool isModel = body.valid && body.vertexCount() >= 4 && body.primitives.size() >= 2;
+
+            auto* child = new TreeItem(item);
+            QString name = names.value(int(i));
+            child->setText(0, name.isEmpty() ? tr("Entry %1").arg(i)
+                                              : tr("%1 — %2").arg(i).arg(name));
+            child->setText(1, isModel ? tr("3D model (%1 verts)").arg(body.vertexCount())
+                                       : tr("Data"));
+            child->setText(2, QLocale().formattedDataSize(qint64(raw.size()), 1));
+            child->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+            child->setData(0, kPathRole, path);
+            child->setData(0, kTypeRole, int(type));
+            child->setData(0, kEntryRole, int(i));
+            if (!isModel) {
+                child->setForeground(0, QBrush(QColor(150, 150, 150)));
+                child->setForeground(1, QBrush(QColor(150, 150, 150)));
+            }
+        }
+    } catch (const std::exception& e) {
+        auto* child = new TreeItem(item);
+        child->setText(0, tr("Failed to read archive: %1").arg(e.what()));
+        child->setForeground(0, QBrush(QColor(200, 120, 120)));
+    }
+    QGuiApplication::restoreOverrideCursor();
+    applyTypeFilter();
 }
 
 void MainWindow::fileTreeContextMenu(const QPoint& pos) {
@@ -875,7 +953,20 @@ void MainWindow::openPath(const QString& path, FileType type) {
         case FileType::Elf:
             showElfFile(path);
             break;
+        case FileType::AitdRooms:
+            // Rooms assemble into one floor plan rather than being browsed
+            // entry by entry, so they get their own handler.
+            showAitdRoomsFile(path);
+            break;
         case FileType::AitdPak:
+        case FileType::AitdArchive:
+        case FileType::AitdAnimPak:
+        case FileType::AitdMaskPak:
+        case FileType::AitdSoundPak:
+        case FileType::AitdScript:
+            // Every other AITD PAK opens the same browser: entries are
+            // listed and named, and any that parse as geometry render in
+            // the viewport. A mask or script archive simply has none.
             showAitdPakFile(path);
             break;
         case FileType::AitdImage:
@@ -1455,6 +1546,155 @@ void MainWindow::showAitdPakFile(const QString& path) {
     aitdTimer_->start(40);   // ~25 fps spin
 }
 
+void MainWindow::convertAudioTo3do() {
+    QStringList inputs = QFileDialog::getOpenFileNames(
+        this, tr("Choose audio to convert"),
+        QSettings().value(QStringLiteral("lastAudioIn")).toString(),
+        tr("Audio (*.wav *.aiff *.aif *.aifc);;All files (*)"));
+    if (inputs.isEmpty()) {
+        return;
+    }
+    QSettings().setValue(QStringLiteral("lastAudioIn"), QFileInfo(inputs.front()).absolutePath());
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(tr("Convert audio to 3DO format"));
+    auto* form = new QFormLayout;
+
+    auto* codecBox = new QComboBox;
+    const std::vector<m2audio::AudioCodec> codecs{
+        m2audio::AudioCodec::Sdx2,  m2audio::AudioCodec::Cbd2,  m2audio::AudioCodec::Adp4,
+        m2audio::AudioCodec::Sqs2,  m2audio::AudioCodec::Pcm16, m2audio::AudioCodec::Pcm8};
+    for (auto c : codecs) {
+        codecBox->addItem(QString::fromLatin1(m2audio::codecName(c)));
+    }
+    codecBox->setCurrentIndex(0); // SDX2, the recommended default
+
+    auto* rateBox = new QComboBox;
+    for (uint32_t r : m2audio::standardSampleRates()) {
+        rateBox->addItem(tr("%1 Hz").arg(r), r);
+    }
+    rateBox->setCurrentIndex(int(std::distance(
+        m2audio::standardSampleRates().begin(),
+        std::find(m2audio::standardSampleRates().begin(),
+                   m2audio::standardSampleRates().end(), 22050u))));
+
+    auto* modeBox = new QComboBox;
+    modeBox->addItem(tr("Mono"), 1);
+    modeBox->addItem(tr("Stereo"), 2);
+
+    auto* containerBox = new QComboBox;
+    containerBox->addItem(tr("AIFC (compressed)"), int(m2audio::AudioContainer::Aifc));
+    containerBox->addItem(tr("AIFF (uncompressed only)"), int(m2audio::AudioContainer::Aiff));
+
+    auto* summary = new QLabel;
+    summary->setWordWrap(true);
+    summary->setMinimumWidth(420);
+
+    form->addRow(tr("Codec:"), codecBox);
+    form->addRow(tr("Sample rate:"), rateBox);
+    form->addRow(tr("Mode:"), modeBox);
+    form->addRow(tr("Container:"), containerBox);
+    form->addRow(summary);
+
+    auto currentOptions = [&] {
+        m2audio::EncodeOptions o;
+        o.codec = codecs[size_t(codecBox->currentIndex())];
+        o.sampleRate = rateBox->currentData().toUInt();
+        o.channels = uint32_t(modeBox->currentData().toInt());
+        o.container = m2audio::AudioContainer(containerBox->currentData().toInt());
+        return o;
+    };
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    auto refresh = [&] {
+        m2audio::EncodeOptions o = currentOptions();
+        QString problem = QString::fromStdString(m2audio::validateOptions(o));
+        uint32_t bps = m2audio::bitrateBps(o);
+        QString text = tr("%1\n\nBitrate: %2 kbit/s — %3 KB per second of audio.")
+                            .arg(QString::fromLatin1(m2audio::codecDescription(o.codec)))
+                            .arg(bps / 1000.0, 0, 'f', 1)
+                            .arg(bps / 8.0 / 1024.0, 0, 'f', 1);
+        if (!problem.isEmpty()) {
+            text += tr("\n\n⚠ %1").arg(problem);
+        }
+        summary->setText(text);
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(problem.isEmpty());
+    };
+    for (QComboBox* box : {codecBox, rateBox, modeBox, containerBox}) {
+        connect(box, &QComboBox::currentIndexChanged, &dlg, [&refresh] { refresh(); });
+    }
+    refresh();
+
+    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    auto* layout = new QVBoxLayout(&dlg);
+    layout->addLayout(form);
+    layout->addWidget(buttons);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    QString outDir = QFileDialog::getExistingDirectory(
+        this, tr("Where should the converted files go?"),
+        QFileInfo(inputs.front()).absolutePath());
+    if (outDir.isEmpty()) {
+        return;
+    }
+
+    const m2audio::EncodeOptions options = currentOptions();
+    const char* ext = (options.container == m2audio::AudioContainer::Aifc) ? "aifc" : "aiff";
+    int written = 0;
+    QStringList errors;
+    for (const QString& in : inputs) {
+        try {
+            // Both readers decode to interleaved 16-bit, so the encoder
+            // sees the same shape whichever the source was.
+            m2audio::AudioBuffer buf;
+            if (in.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive)) {
+                m2audio::Wav w = m2audio::Wav::loadFromFile(in.toStdWString());
+                buf.samples = w.decodePcm16();
+                buf.sampleRate = w.sampleRate();
+                buf.channels = w.channels();
+            } else {
+                m2audio::Aiff a = m2audio::Aiff::loadFromFile(in.toStdWString());
+                buf.samples = a.decodePcm16();
+                buf.sampleRate = a.sampleRate();
+                buf.channels = a.channels();
+            }
+            if (buf.samples.empty()) {
+                errors << tr("%1: no decodable audio").arg(QFileInfo(in).fileName());
+                continue;
+            }
+            std::vector<uint8_t> out = m2audio::encodeAudioFile(buf, options);
+            QString outPath = QStringLiteral("%1/%2.%3")
+                                   .arg(outDir, QFileInfo(in).completeBaseName(),
+                                        QString::fromLatin1(ext));
+            QFile f(outPath);
+            if (f.open(QIODevice::WriteOnly) &&
+                f.write(reinterpret_cast<const char*>(out.data()), qint64(out.size())) ==
+                    qint64(out.size())) {
+                ++written;
+            } else {
+                errors << tr("%1: write failed").arg(outPath);
+            }
+        } catch (const std::exception& e) {
+            errors << QStringLiteral("%1: %2").arg(QFileInfo(in).fileName(),
+                                                     QString::fromUtf8(e.what()));
+        }
+    }
+
+    QString msg = tr("Converted %1 of %2 file(s) to %3 at %4 Hz %5.")
+                       .arg(written)
+                       .arg(inputs.size())
+                       .arg(QString::fromLatin1(m2audio::codecName(options.codec)))
+                       .arg(options.sampleRate)
+                       .arg(options.channels == 1 ? tr("mono") : tr("stereo"));
+    if (!errors.isEmpty()) {
+        msg += QStringLiteral("\n\n") + errors.join(QLatin1Char('\n'));
+    }
+    QMessageBox::information(this, tr("Convert audio"), msg);
+}
+
 void MainWindow::loadAitdNameDbDialog() {
     QString start = QSettings().value(QStringLiteral("aitd/nameDb")).toString();
     QString path = QFileDialog::getOpenFileName(
@@ -1485,24 +1725,33 @@ QHash<int, QString> MainWindow::loadAitdNameDatabase(const QString& pakPath) {
     // index. They are the community's accumulated identification work; we
     // read them if present but never bundle them.
     QStringList candidates;
-    // A database the user pointed at explicitly wins: the AITD_PakEdit
-    // distribution keeps its databases with the tool, not with the game, so
-    // auto-discovery alone finds nothing in the common case.
+    // A database the user pointed at explicitly wins.
     QString chosen = QSettings().value(QStringLiteral("aitd/nameDb")).toString();
     if (!chosen.isEmpty() && QFileInfo::exists(chosen)) {
         candidates << chosen;
     }
+    // Then anything sitting with the game.
     QStringList searchDirs{pakInfo.absolutePath()};
     QDir parent(pakInfo.absolutePath());
     if (parent.cdUp()) {
         searchDirs << parent.absolutePath();
     }
+    searchDirs << QCoreApplication::applicationDirPath();
     for (const QString& dirPath : searchDirs) {
         QDir dir(dirPath);
         for (const QString& dbName :
              dir.entryList({QStringLiteral("*PAK_DB.json")}, QDir::Files, QDir::Name)) {
             candidates << dir.filePath(dbName);
         }
+    }
+    // Finally the bundled databases, so names appear with no setup at all.
+    // The AITD_PakEdit distribution keeps its databases with the tool
+    // rather than with the game, so relying on discovery alone found
+    // nothing in the common case.
+    QDir builtIn(QStringLiteral(":/aitd/aitd"));
+    for (const QString& dbName :
+         builtIn.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name)) {
+        candidates << builtIn.filePath(dbName);
     }
 
     {
@@ -1541,6 +1790,96 @@ QHash<int, QString> MainWindow::loadAitdNameDatabase(const QString& pakPath) {
         }
     }
     return names;
+}
+
+void MainWindow::showAitdRoomsFile(const QString& path) {
+    stopAllPlayback();
+    aitdPakPath_ = path;
+    std::vector<m2model::AitdRoom> rooms;
+    size_t entries = 0;
+    try {
+        m2model::AitdPak pak = m2model::AitdPak::openFromFile(path.toStdWString());
+        entries = pak.entryCount();
+        // Every room of the floor lives in entry 0, behind an offset table;
+        // entry 1 is the camera data.
+        if (entries > 0) {
+            rooms = m2model::parseAitdRoomArchive(pak.read(0));
+        }
+    } catch (const std::exception& e) {
+        selectorMode_ = SelectorMode::None;
+        viewStack_->setCurrentWidget(placeholder_);
+        placeholder_->setText(tr("Failed to open room archive:\n%1").arg(e.what()));
+        return;
+    }
+
+    size_t validRooms = 0, colliders = 0, triggers = 0;
+    for (const auto& r : rooms) {
+        if (!r.valid) {
+            continue;
+        }
+        ++validRooms;
+        colliders += r.colliders.size();
+        triggers += r.triggers.size();
+    }
+
+    // The whole floor as one body, so the existing camera, render modes and
+    // OBJ export all work on it unchanged.
+    //
+    // Colliders only by default: triggers are tall volumes that sit above
+    // the floor, and from any overhead angle they hide the layout the view
+    // exists to show. The frame selector switches them on.
+    aitdBody_ = m2model::buildRoomBody(rooms, /*includeTriggers=*/false);
+    if (!aitdBody_.valid) {
+        selectorMode_ = SelectorMode::None;
+        viewStack_->setCurrentWidget(placeholder_);
+        placeholder_->setText(
+            tr("No room geometry found in:\n%1\n\n%2 entries, none parsed as a room.")
+                .arg(path)
+                .arg(entries));
+        return;
+    }
+
+    selectorMode_ = SelectorMode::AitdRooms;
+    aitdRooms_ = std::move(rooms);
+    textureSelect_->blockSignals(true);
+    textureSelect_->clear();
+    textureSelect_->addItem(tr("Floor: colliders (%1 rooms)").arg(validRooms));
+    textureSelect_->addItem(tr("Floor: colliders + triggers"));
+    textureSelect_->setCurrentIndex(0);
+    textureSelect_->blockSignals(false);
+
+    lodSelect_->blockSignals(true);
+    lodSelect_->clear();
+    lodSelect_->addItem(tr("Solid (materials)"));
+    lodSelect_->addItem(tr("Solid (flat)"));
+    lodSelect_->addItem(tr("Wireframe"));
+    lodSelect_->addItem(tr("Points"));
+    lodSelect_->setCurrentIndex(2); // wireframe reads a floor plan best
+    lodSelect_->blockSignals(false);
+
+    modelView_->setBody(aitdBody_);
+    modelView_->setRenderMode(m2model::AitdRenderMode::Wireframe);
+    modelView_->setSpinning(false); // a floor plan should hold still
+    viewStack_->setCurrentWidget(modelView_);
+
+    infoView_->setPlainText(
+        tr("File: %1\n\nAlone in the Dark floor / room geometry\n"
+           "Rooms: %2 of %3 entries\nColliders: %4\nTriggers: %5\n"
+           "Extent: X[%6,%7] Y[%8,%9] Z[%10,%11]\n\n"
+           "AITD's visuals are the pre-rendered backdrops; what a room "
+           "stores is its collision volumes. Grey is walkable floor, blue a "
+           "link to another room, deep blue an interactive box, dark red a "
+           "script trigger.\n\n"
+           "Drag to orbit, right-drag to pan, wheel to zoom. File > Export "
+           "writes the floor as .obj + .mtl.")
+            .arg(path)
+            .arg(validRooms)
+            .arg(entries)
+            .arg(colliders)
+            .arg(triggers)
+            .arg(aitdBody_.bbox[0]).arg(aitdBody_.bbox[1])
+            .arg(aitdBody_.bbox[2]).arg(aitdBody_.bbox[3])
+            .arg(aitdBody_.bbox[4]).arg(aitdBody_.bbox[5]));
 }
 
 void MainWindow::showAitdImageFile(const QString& path) {
@@ -1876,6 +2215,21 @@ void MainWindow::refreshTexturePreview() {
         if (frame >= 0 && size_t(frame) < animFrames_.size()) {
             displayImage(animFrames_[size_t(frame)]);
         }
+        return;
+    }
+    if (selectorMode_ == SelectorMode::AitdRooms) {
+        bool withTriggers = textureSelect_->currentIndex() == 1;
+        aitdBody_ = m2model::buildRoomBody(aitdRooms_, withTriggers);
+        auto mode = m2model::AitdRenderMode::Wireframe;
+        switch (lodSelect_->currentIndex()) {
+        case 0: mode = m2model::AitdRenderMode::SolidMaterials; break;
+        case 1: mode = m2model::AitdRenderMode::SolidFlat; break;
+        case 3: mode = m2model::AitdRenderMode::Points; break;
+        default: break;
+        }
+        modelView_->setBody(aitdBody_);
+        modelView_->setRenderMode(mode);
+        viewStack_->setCurrentWidget(modelView_);
         return;
     }
     if (selectorMode_ == SelectorMode::AitdBodies) {

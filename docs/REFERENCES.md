@@ -51,7 +51,7 @@ Entries are marked by how they were used:
 | [**fitd**](https://github.com/yaz0r/fitd) — Free In The Dark | Ground truth | The AITD engine reimplementation. `hqr.cpp createBodyFromPtr` is the authority for the body format; `renderer.cpp` shows how primitives are drawn (including that PolyTexture polygons are rendered *flat*). |
 | **AITD_PakEdit** | Ground truth | PAK archive layout, and the 256-colour AITD palette (`AloneFile::palette`), transcribed into `AitdPalette.cpp` |
 | **AITD-tools** | Ground truth | Confirmed PKWARE DCL *implode* as the PAK compression, after LZSS was disproved |
-| [**AITD-roomviewer**](https://github.com/tigrouind/AITD-roomviewer) | Corroborating | Room/floor (`ETAGE*.PAK`) layout, camera zones, and a reference model viewer. The obvious next source for the room geometry gap in [LIMITATIONS.md](LIMITATIONS.md). |
+| [**AITD-roomviewer**](https://github.com/tigrouind/AITD-roomviewer) | Ground truth | Room/floor (`ETAGE*.PAK`) layout — `RoomLoader.cs` is the authority for the offset table, the room-relative box lists, and the collider flag bits. M2Suite's stage viewer is built from it. |
 | **AITD_PakEdit name databases** | Data | `*_PAK_DB.json` — hand-curated per-entry names and content types. Read when present; never bundled. |
 | **Mark Adler's `blast`** | Vendored | Public-domain PKWARE DCL *implode* decoder — `libs/libm2model/third_party/pak_explode.cpp` |
 | **operafs** (Linux driver) | Ground truth | Opera filesystem — block layout, directory chaining, Shift-JIS names |

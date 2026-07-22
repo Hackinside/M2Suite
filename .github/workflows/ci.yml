@@ -6,9 +6,8 @@ name: CI
 # FFmpeg, so it configures in seconds. The full GUI preset would pull Qt6
 # through vcpkg and take hours on a cold runner for very little extra
 # signal — every format decision lives in the libraries, which is exactly
-# what this job covers.
-#
-# The GUI build is verified locally before a release; see docs/RELEASING.md.
+# what this job covers. The GUI build is verified locally before a release;
+# see docs/RELEASING.md.
 
 on:
   push:
@@ -19,15 +18,22 @@ on:
 jobs:
   build-and-test:
     name: Build core libraries and run tests
-    runs-on: windows-latest
+    # Pinned rather than windows-latest: the "latest" image moves between
+    # Visual Studio versions without warning, and the core-msvc preset asks
+    # for the "Visual Studio 17 2022" generator by name.
+    runs-on: windows-2022
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up MSVC
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
+      # No MSVC setup action is needed. The core-msvc preset uses the Visual
+      # Studio generator, which locates the toolchain itself — an external
+      # action here is one more thing that can fail before the build even
+      # starts.
+      - name: Show tool versions
+        run: |
+          cmake --version
+          ctest --version
 
       - name: Configure
         run: cmake --preset core-msvc
@@ -38,33 +44,41 @@ jobs:
       - name: Test
         run: ctest --preset core-msvc --output-on-failure
 
-  no-game-data:
-    name: Check that no game data was committed
+  hygiene:
+    name: Repository hygiene
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      # M2Suite must never carry game assets — see CONTRIBUTING.md. This is
-      # a coarse tripwire, not a proof: it catches the accidental commit of
-      # a disc image or an archive dropped in to reproduce a bug.
-      - name: Look for disc images and game archives
+      # M2Suite ships no game assets — see CONTRIBUTING.md. This is a coarse
+      # tripwire for the accidental commit of a disc image or an archive
+      # someone dropped in to reproduce a bug.
+      #
+      # tests/fixtures/ is exempt: it holds the small, deliberate samples the
+      # suite is built on, and they are reviewed when they change. Without
+      # the exemption this check fails on the project's own test data, which
+      # is exactly what it did the first time it ran.
+      - name: Look for game data outside tests/fixtures
         run: |
-          matches=$(git ls-files | grep -Ei '\.(iso|bin|cue|img|chd|pak|utf|cel|anim|imag|aifc|str|stream|film|cine|itd|pics|bob|pad)$' || true)
+          matches=$(git ls-files \
+            | grep -v '^tests/fixtures/' \
+            | grep -Ei '\.(iso|cue|chd|img|pak|utf|cel|anim|imag|aifc|str|stream|film|cine|itd|pics|bob|pad)$' \
+            || true)
           if [ -n "$matches" ]; then
             echo "::error::Files that look like game data were committed:"
             echo "$matches"
             exit 1
           fi
-          echo "No game data found."
+          echo "No game data outside tests/fixtures."
 
       - name: Look for unexpectedly large files
         run: |
-          # The portable package in dist/ is the one binary we ship on
+          # The portable package under dist/ is the one binary shipped on
           # purpose; anything else over 5 MB deserves a human look.
           large=$(git ls-files | grep -v '^dist/' | while read -r f; do
             size=$(stat -c%s "$f")
-            if [ "$size" -gt 5242880 ]; then echo "$f ($((size/1048576)) MB)"; fi
+            if [ "$size" -gt 5242880 ]; then echo "$f ($((size / 1048576)) MB)"; fi
           done)
           if [ -n "$large" ]; then
             echo "::error::Large files outside dist/:"
