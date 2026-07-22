@@ -434,6 +434,60 @@ the header found a value that "fit" and produced geometry that looked
 that sits *before* the real count, so every model was being read at the
 wrong offset. There is no shortcut here: the layout must be walked exactly.
 
+### Bone groups — vertices are NOT in model space
+
+**Finding (verified) — the single most consequential AITD finding so far.**
+
+A body with `INFO_ANIM` stores its vertices in **group-local space**. Each
+group (bone) owns a run of vertices, and every one of them is an *offset
+from the position of that group's base vertex* — the vertex it hangs off in
+its parent. A parser that stops after reading the vertex array gets a mesh
+whose limbs are all bunched around the origin.
+
+To resolve it, walk the groups **in stored order, in place**:
+
+```
+for each group g, in the order they appear in the file:
+    base = vertices[g.baseVertex]          // already in model space
+    for k in 0 .. g.vertexCount-1:
+        vertices[g.start + k] += base
+```
+
+Two details are load-bearing:
+
+- **Stored order matters.** Groups are laid out parents-first, so by the
+  time a child is reached its base vertex has already been moved into model
+  space and the offsets cascade correctly down the chain.
+- **It must be in place.** Resolving against a pristine copy of the vertex
+  array breaks every group below the first level, because children need the
+  parent's *resolved* position, not its original one.
+
+`start` and `baseVertex` are stored as byte offsets — divide by 6.
+
+Group record layout, following the group-order table (one `u16` per group):
+
+| Field | Size | Notes |
+|---|---|---|
+| `start` | u16 | first vertex, byte offset (÷6) |
+| `numVertices` | u16 | how many vertices the group owns |
+| `baseVertices` | u16 | base vertex, byte offset (÷6) |
+| `orgGroup` | s8 | parent group index, −1 at the root |
+| `numGroup` | s8 | |
+| `state.type` | s16 | 0 = rotate, 1 = translate, 2 = zoom |
+| `state.delta[3]` | s16 × 3 | animation deltas, zero in the bind pose |
+| `state.rotateDelta[3]` + pad | s16 × 4 | **AITD2 only** (`INFO_OPTIMISE`) |
+
+So the record is **0x10 bytes on AITD1** and **0x18 on AITD2**. Reading the
+wrong stride swallows the primitive count and the whole primitive list
+decodes as garbage.
+
+**How it was caught:** `LISTBOD2.PAK` entry 12 (AITD1) is Emily Hartwood.
+It rendered as a jumble of overlapping shards. Comparing against a
+reference render of the same body made it obvious the geometry was present
+but misplaced, not corrupt — which pointed at a transform rather than a
+parse error. Pinned by regression tests
+(`test_aitd_synth.cpp`, `testGroupHierarchyResolves`).
+
 ### Primitives
 
 ```
@@ -539,6 +593,45 @@ also increases downward, model Y maps straight to screen Y and models render
 upright with no flip. Exporters targeting Y-up tools (OBJ) must negate Y
 **and** Z to preserve handedness; M2Suite's OBJ exporter does.
 
+### Entry name databases
+
+AITD_PakEdit ships hand-curated JSON databases (`AITD1_CD_PAK_DB.json`,
+`AITD1_floppy_PAK_DB.json`, …) that name the contents of each archive
+entry. They are the community's accumulated identification work and turn
+"Model 12" into "Emily Hartwood".
+
+```json
+{ "all_PAKs": {
+    "CAMERA02.PAK": {
+      "25": { "default_compr": 1, "info": "1st Floor Library (Secret Room)", "type": 2 }
+    } } }
+```
+
+Keys are archive filenames, then entry index as a string. `info` is `"?"`
+when the entry has not been identified. The `type` field is a content
+class:
+
+| `type` | Meaning |
+|---|---|
+| 0 | Unclassified / other |
+| 1 | Text (in-game messages, readable documents) |
+| 2 | Background image |
+| 3 | Floor / room layout |
+| 4 | Camera data |
+| 6 | Full-screen image sequence |
+| 7 | 3D model (body) |
+
+These databases doubled as an **independent check on the renderer**. After
+the bone-group fix, a contact sheet of `LISTBOD2.PAK` was rendered blind and
+then compared against the database names: entry 12 "Emily", entry 5 "4 Pane
+Window", entry 0 "Wooden Chest (Closed), Loft", entry 20 "Indian Cover" —
+every one matched what had been drawn. Cheap, and much stronger evidence
+than eyeballing a single model.
+
+M2Suite reads any `*PAK_DB.json` sitting beside the archive or one level up
+and uses it to label entries. It **does not bundle one** — the databases
+belong to their authors, and are game-specific.
+
 ### Rendering traps
 
 Two bugs here produced the "broken models" symptom, and neither was a
@@ -565,6 +658,15 @@ are pinned by regression tests.
 interpenetrating geometry incorrectly — limbs crossing a torso visibly tear.
 A per-pixel depth buffer, with depth interpolated across each scanline span,
 fixes it. Sorting is kept as a cheap first pass.
+
+**AITD has no lighting model — do not add one.** The artists baked shading
+into their *choice of palette index per face*, which is why adjacent faces
+already read as lit. Applying a light term on top double-shades the model;
+combined with a two-sided winding test it dimmed most of the mesh, and
+Emily Hartwood came out near-black next to a reference render of the same
+body. The faithful mode renders the palette colour unmodified. A neutral
+grey mode keeps the shading, because there the point is to read silhouette
+and form rather than to reproduce the original.
 
 ---
 

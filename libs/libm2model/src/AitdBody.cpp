@@ -35,6 +35,49 @@ struct Cursor {
 constexpr uint16_t INFO_ANIM = 2;
 constexpr uint16_t INFO_TORTUE = 4;
 constexpr uint16_t INFO_OPTIMISE = 8;
+
+// Converts group-local vertices into model space.
+//
+// An animated AITD body does NOT store its vertices in model space. Each
+// group (bone) owns a run of vertices stored as offsets from the group's
+// "base vertex" — the vertex it hangs off in the parent group. To get a
+// usable mesh, every vertex in a group must have its base vertex position
+// added to it.
+//
+// This is done in stored group order, in place, exactly as fitd's renderer
+// does it (renderer.cpp, the loop over m_groups after the bone deltas):
+// groups are laid out parents-first, so by the time a child is processed
+// its base vertex has already been moved into model space and the offsets
+// cascade correctly down the hierarchy. Doing it in a different order, or
+// out of place against a pristine copy, silently breaks limbs further down
+// the chain.
+//
+// Skipping this step entirely is what left every limb bunched around the
+// origin, which read as a "broken model" (AITD1 LISTBOD2.PAK entry 12 —
+// Emily Hartwood — rendered as a jumble of overlapping shards).
+void resolveGroupHierarchy(AitdBody& b) {
+    const size_t n = b.vertexCount();
+    for (const AitdGroup& g : b.groups) {
+        if (g.baseVertex >= n) {
+            continue; // corrupt table entry: leave those vertices alone
+        }
+        const int32_t bx = b.vertices[size_t(g.baseVertex) * 3 + 0];
+        const int32_t by = b.vertices[size_t(g.baseVertex) * 3 + 1];
+        const int32_t bz = b.vertices[size_t(g.baseVertex) * 3 + 2];
+        for (uint16_t k = 0; k < g.vertexCount; ++k) {
+            const size_t v = size_t(g.start) + k;
+            if (v >= n) {
+                break;
+            }
+            // The engine works in 16-bit fixed point and relies on wrapping;
+            // clamping instead would distort models that legitimately reach
+            // the edge of the range.
+            b.vertices[v * 3 + 0] = int16_t(int32_t(b.vertices[v * 3 + 0]) + bx);
+            b.vertices[v * 3 + 1] = int16_t(int32_t(b.vertices[v * 3 + 1]) + by);
+            b.vertices[v * 3 + 2] = int16_t(int32_t(b.vertices[v * 3 + 2]) + bz);
+        }
+    }
+}
 } // namespace
 
 AitdBody parseAitdBody(const std::vector<uint8_t>& data) {
@@ -76,19 +119,40 @@ AitdBody parseAitdBody(const std::vector<uint8_t>& data) {
 
     if (flags & INFO_ANIM) {
         uint16_t numGroups = c.u16();
-        // group-order table: one u16 per group
+        // Group-order table: one u16 per group, a byte offset into the
+        // records that follow. Only animation playback needs the ordering,
+        // so it is read and discarded here.
         for (uint16_t i = 0; i < numGroups; ++i) {
             c.u16();
         }
-        // group records: 0x18 bytes (AITD2+, INFO_OPTIMISE) or 0x10 (AITD1)
-        size_t recSize = (flags & INFO_OPTIMISE) ? 0x18 : 0x10;
-        for (uint16_t i = 0; i < numGroups; ++i) {
-            c.skip(recSize);
+        // Group records are 0x18 bytes on AITD2+ (INFO_OPTIMISE), 0x10 on
+        // AITD1 — the AITD2 record adds a rotation delta and a pad word.
+        b.groups.reserve(numGroups);
+        for (uint16_t i = 0; i < numGroups && c.ok; ++i) {
+            AitdGroup g;
+            g.start = uint16_t(c.u16() / 6); // byte offsets, 6 bytes/vertex
+            g.vertexCount = c.u16();
+            g.baseVertex = uint16_t(c.u16() / 6);
+            g.parentGroup = int8_t(c.u8());
+            g.groupNumber = int8_t(c.u8());
+            g.transformType = int16_t(c.u16());
+            g.delta[0] = int16_t(c.u16());
+            g.delta[1] = int16_t(c.u16());
+            g.delta[2] = int16_t(c.u16());
+            if (flags & INFO_OPTIMISE) {
+                c.u16(); // rotateDelta[0]
+                c.u16(); // rotateDelta[1]
+                c.u16(); // rotateDelta[2]
+                c.u16(); // padding
+            }
+            b.groups.push_back(g);
         }
         if (!c.ok) {
-            b.valid = true; // keep vertices even if groups are truncated
+            b.groups.clear();
+            b.valid = true; // keep vertices even if the group table is short
             return b;
         }
+        resolveGroupHierarchy(b);
     }
 
     uint16_t numPrimitives = c.u16();

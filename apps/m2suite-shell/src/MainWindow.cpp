@@ -14,6 +14,8 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -204,7 +206,8 @@ bool typeMatchesFilter(FileType type, int filterIndex) {
             return type == FileType::Instrument || type == FileType::Font ||
                    type == FileType::Ddf || type == FileType::Intl ||
                    type == FileType::Pebm || type == FileType::Elf ||
-                   type == FileType::AitdArchive;
+                   type == FileType::AitdArchive || type == FileType::AitdPages ||
+                   type == FileType::AitdData || type == FileType::ExportedModel;
         default: return true;
     }
 }
@@ -225,6 +228,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(extractDiscAction, &QAction::triggered, this, &MainWindow::extractDiscImage);
     auto* toUtfAction = fileMenu->addAction(tr("Convert Images to &UTF Texture..."));
     connect(toUtfAction, &QAction::triggered, this, &MainWindow::convertImagesToUtf);
+    auto* nameDbAction = fileMenu->addAction(tr("Load AITD &Name Database..."));
+    nameDbAction->setToolTip(tr("An AITD_PakEdit *PAK_DB.json, to label archive "
+                                 "entries with their real names"));
+    connect(nameDbAction, &QAction::triggered, this, &MainWindow::loadAitdNameDbDialog);
     fileMenu->addSeparator();
     auto* exportAction = fileMenu->addAction(tr("&Export Selected..."));
     exportAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_E));
@@ -1402,6 +1409,11 @@ void MainWindow::showAitdPakFile(const QString& path) {
         return;
     }
 
+    // Community name databases give entries real names ("Emily Hartwood"
+    // rather than "Model 12"), which is the difference between browsing an
+    // archive and searching it.
+    aitdNames_ = loadAitdNameDatabase(path);
+
     // Populate the frame selector with entries that parse as bodies.
     selectorMode_ = SelectorMode::AitdBodies;
     textureSelect_->blockSignals(true);
@@ -1409,8 +1421,16 @@ void MainWindow::showAitdPakFile(const QString& path) {
     int firstBody = -1;
     for (size_t i = 0; i < aitdPak_->entryCount(); ++i) {
         m2model::AitdBody b = m2model::parseAitdBody(aitdPak_->read(i));
-        textureSelect_->addItem(b.valid ? tr("Model %1 (%2 verts)").arg(i).arg(b.vertexCount())
-                                         : tr("Entry %1 (not a model)").arg(i));
+        QString name = aitdNames_.value(int(i));
+        QString label;
+        if (!b.valid) {
+            label = tr("Entry %1 (not a model)").arg(i);
+        } else if (name.isEmpty()) {
+            label = tr("Model %1 (%2 verts)").arg(i).arg(b.vertexCount());
+        } else {
+            label = tr("%1 — %2").arg(i).arg(name);
+        }
+        textureSelect_->addItem(label);
         if (b.valid && firstBody < 0) {
             firstBody = int(i);
         }
@@ -1433,6 +1453,94 @@ void MainWindow::showAitdPakFile(const QString& path) {
 
     refreshTexturePreview(); // renders the selected model
     aitdTimer_->start(40);   // ~25 fps spin
+}
+
+void MainWindow::loadAitdNameDbDialog() {
+    QString start = QSettings().value(QStringLiteral("aitd/nameDb")).toString();
+    QString path = QFileDialog::getOpenFileName(
+        this, tr("Load AITD name database"), start,
+        tr("AITD name database (*PAK_DB.json *.json);;All files (*)"));
+    if (path.isEmpty()) {
+        return;
+    }
+    QSettings().setValue(QStringLiteral("aitd/nameDb"), path);
+    if (selectorMode_ == SelectorMode::AitdBodies && !aitdPakPath_.isEmpty()) {
+        showAitdPakFile(aitdPakPath_); // re-label the open archive
+    }
+    QHash<int, QString> probe = aitdNames_;
+    statusBar()->showMessage(
+        probe.isEmpty()
+            ? tr("Name database loaded, but it has no entries for this archive.")
+            : tr("Name database loaded — %1 entries named.").arg(probe.size()),
+        6000);
+}
+
+QHash<int, QString> MainWindow::loadAitdNameDatabase(const QString& pakPath) {
+    QHash<int, QString> names;
+    QFileInfo pakInfo(pakPath);
+    QString pakName = pakInfo.fileName().toUpper();
+
+    // AITD_PakEdit ships hand-curated databases (AITD1_CD_PAK_DB.json,
+    // AITD1_floppy_PAK_DB.json, ...) keyed by archive name then entry
+    // index. They are the community's accumulated identification work; we
+    // read them if present but never bundle them.
+    QStringList candidates;
+    // A database the user pointed at explicitly wins: the AITD_PakEdit
+    // distribution keeps its databases with the tool, not with the game, so
+    // auto-discovery alone finds nothing in the common case.
+    QString chosen = QSettings().value(QStringLiteral("aitd/nameDb")).toString();
+    if (!chosen.isEmpty() && QFileInfo::exists(chosen)) {
+        candidates << chosen;
+    }
+    QStringList searchDirs{pakInfo.absolutePath()};
+    QDir parent(pakInfo.absolutePath());
+    if (parent.cdUp()) {
+        searchDirs << parent.absolutePath();
+    }
+    for (const QString& dirPath : searchDirs) {
+        QDir dir(dirPath);
+        for (const QString& dbName :
+             dir.entryList({QStringLiteral("*PAK_DB.json")}, QDir::Files, QDir::Name)) {
+            candidates << dir.filePath(dbName);
+        }
+    }
+
+    {
+        for (const QString& dbPath : candidates) {
+            QFile f(dbPath);
+            if (!f.open(QIODevice::ReadOnly)) {
+                continue;
+            }
+            QJsonParseError err{};
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &err);
+            if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+                continue;
+            }
+            QJsonObject all = doc.object().value(QStringLiteral("all_PAKs")).toObject();
+            // Keys are archive filenames; match case-insensitively because
+            // the 3DO discs and the DOS releases disagree on casing.
+            for (auto it = all.begin(); it != all.end(); ++it) {
+                if (it.key().toUpper() != pakName) {
+                    continue;
+                }
+                QJsonObject entries = it.value().toObject();
+                for (auto e = entries.begin(); e != entries.end(); ++e) {
+                    bool intOk = false;
+                    int idx = e.key().toInt(&intOk);
+                    QString info = e.value().toObject().value(QStringLiteral("info")).toString();
+                    // "?" is the database's placeholder for "not identified
+                    // yet" — showing it would be worse than showing nothing.
+                    if (intOk && !info.isEmpty() && info != QStringLiteral("?")) {
+                        names.insert(idx, info);
+                    }
+                }
+            }
+            if (!names.isEmpty()) {
+                return names;
+            }
+        }
+    }
+    return names;
 }
 
 void MainWindow::showAitdImageFile(const QString& path) {
@@ -1791,10 +1899,11 @@ void MainWindow::refreshTexturePreview() {
                     ++textured;
                 }
             }
+            QString name = aitdNames_.value(idx);
             infoView_->setPlainText(
-                tr("File: %1\n\nAlone in the Dark 3D model (PAK entry %2 of %3)\n"
-                   "Vertices: %4\nPrimitives: %5 (%6 textured)\n"
-                   "Bounding box: X[%7,%8] Y[%9,%10] Z[%11,%12]\n\n"
+                tr("File: %1\n\nAlone in the Dark 3D model (PAK entry %2 of %3)%4\n"
+                   "Vertices: %5\nPrimitives: %6 (%7 textured)\nBones/groups: %8\n"
+                   "Bounding box: X[%9,%10] Y[%11,%12] Z[%13,%14]\n\n"
                    "Drag to orbit, right-drag to pan, wheel to zoom, "
                    "double-click to reset. Use the render-mode box for "
                    "materials / flat / wireframe / points, and File > Export "
@@ -1802,9 +1911,11 @@ void MainWindow::refreshTexturePreview() {
                     .arg(aitdPakPath_)
                     .arg(idx)
                     .arg(aitdPak_->entryCount())
+                    .arg(name.isEmpty() ? QString() : QStringLiteral("\nName: %1").arg(name))
                     .arg(aitdBody_.vertexCount())
                     .arg(aitdBody_.primitives.size())
                     .arg(textured)
+                    .arg(aitdBody_.groups.size())
                     .arg(aitdBody_.bbox[0]).arg(aitdBody_.bbox[1])
                     .arg(aitdBody_.bbox[2]).arg(aitdBody_.bbox[3])
                     .arg(aitdBody_.bbox[4]).arg(aitdBody_.bbox[5]));

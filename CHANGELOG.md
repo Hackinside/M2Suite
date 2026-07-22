@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Alone in the Dark — models now render correctly
+
+- **Bone groups are resolved.** This was the big one. An animated AITD body
+  stores its vertices in *group-local* space — every vertex in a group is an
+  offset from that group's base vertex — and we were reading them as if they
+  were model space. Limbs stayed bunched around the origin, so characters
+  rendered as a jumble of overlapping shards. `LISTBOD2.PAK` entry 12
+  (Emily Hartwood) now matches a reference render of the same body.
+  See [docs/FORMATS.md](docs/FORMATS.md#bone-groups--vertices-are-not-in-model-space).
+- **Faithful colours.** AITD has no lighting model — the artists baked
+  shading into their choice of palette index per face. The added light term
+  double-shaded everything, and with a two-sided winding test it dimmed most
+  of the mesh. "Solid (materials)" now renders the palette colour
+  unmodified; "Solid (flat)" keeps the shading, where reading form is the
+  point.
+- Bone/group count is shown in the info pane, and the parsed group table is
+  exposed for the animation work that comes next.
+
+### Alone in the Dark — browsing
+
+- **Entry names from community databases.** If an AITD_PakEdit
+  `*PAK_DB.json` sits beside the archive (or one level up), entries are
+  labelled with real names — "12 — Emily Hartwood" rather than "Model 12".
+  The databases are read when present and never bundled.
+- **Fixed a file-association bug**: exported models sitting in a game folder
+  (`LISTBOD2.PAK_00000.ply`) were reported as AITD PAK archives, because the
+  filename *contains* a known archive name. Detection is now structural —
+  the offset table is validated first, and the name is only a shortcut past
+  the content probe.
+- New types recognised: `.16X` in-game documents (`PAGES:` magic), `.ITD`
+  engine tables, and `.obj`/`.ply`/`.mtl`/`.gltf` export output, so a game
+  folder someone has been converting in no longer looks half-broken.
+
 ### Project
 
 - **Licensed under GPL-3.0-or-later.** M2Suite now carries an explicit

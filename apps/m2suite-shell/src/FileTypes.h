@@ -32,6 +32,11 @@ enum class FileType {
     AitdImage,     // AITD pre-rendered backdrop (.pics/.bob/.pad) — previewable
     AitdArchive,   // Any other AITD PAK (anims, masks, floors, resources):
                    //   listed and extractable, but not a model archive
+    AitdPages,     // AITD in-game book/document pages, 'PAGES:' magic (.16X)
+    AitdData,      // AITD engine tables (.ITD): objects, vars, defines
+    ExportedModel, // .obj/.ply/.mtl — our own (or another tool's) export
+                   //   output sitting in a game folder. Recognised so it is
+                   //   not mistaken for game data.
 };
 
 FileType sniffFileType(const QString& path);

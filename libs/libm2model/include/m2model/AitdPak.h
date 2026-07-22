@@ -58,10 +58,27 @@ struct AitdPrimitive {
     bool textured() const { return type >= PolyTex8; }
 };
 
+// One bone/group of an animated body. Bodies with INFO_ANIM store their
+// vertices in GROUP-LOCAL space: every vertex in a group is an offset from
+// the position of that group's base vertex. parseAitdBody resolves this
+// into model space (see resolveGroupHierarchy in AitdBody.cpp), so
+// AitdBody::vertices is always directly usable; the table is kept because
+// animation playback needs it.
+struct AitdGroup {
+    uint16_t start = 0;        // first vertex index owned by this group
+    uint16_t vertexCount = 0;  // how many vertices it owns
+    uint16_t baseVertex = 0;   // vertex this group hangs off (its origin)
+    int8_t parentGroup = -1;   // index of the parent group, -1 at the root
+    int8_t groupNumber = 0;
+    int16_t transformType = 0; // 0 = rotate, 1 = translate, 2 = zoom
+    int16_t delta[3] = {};     // animation deltas, zero in the bind pose
+};
+
 struct AitdBody {
     bool valid = false;
     int16_t bbox[6] = {}; // ZVX1,ZVX2,ZVY1,ZVY2,ZVZ1,ZVZ2 (min/max per axis)
-    std::vector<int16_t> vertices; // flat x,y,z triples
+    std::vector<int16_t> vertices; // flat x,y,z triples, in MODEL space
+    std::vector<AitdGroup> groups; // empty unless the body is animated
     std::vector<AitdPrimitive> primitives;
     size_t vertexCount() const { return vertices.size() / 3; }
 };

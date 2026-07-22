@@ -195,32 +195,50 @@ FileType sniffFileType(const QString& path) {
         return FileType::AitdImage;
     }
 
-    // AITD archives have no magic either — they open with a little-endian
-    // offset table whose first entry is 0 and whose second is the table
-    // size. A sweep of both 3DO AITD games showed the body archives are
-    // exactly LISTBODY/LISTBOD2 (AITD1, 272 models each) and the numbered
+    // AITD in-game book/document pages carry a plain-text magic.
+    if (n >= 6 && std::memcmp(buf, "PAGES:", 6) == 0) {
+        return FileType::AitdPages;
+    }
+
+    // AITD archives have no magic — they open with a little-endian offset
+    // table whose first entry is 0 and whose second is the table size. A
+    // sweep of both 3DO AITD games showed the body archives are exactly
+    // LISTBODY/LISTBOD2 (AITD1, 272 models each) and the numbered
     // *LSTBODY.PAK (AITD2, 553); every other PAK holds anims, masks,
-    // floors, scripts or samples. Name-matching alone would miss renamed
-    // archives, so fall back to probing the contents.
-    {
+    // floors, scripts or samples.
+    //
+    // Detection is purely structural. Matching on the filename alone used
+    // to claim anything *containing* a known archive name, so models
+    // exported beside the archive — LISTBOD2.PAK_00000.ply — were reported
+    // as AITD PAKs. The offset table is checked first; only then is the
+    // name consulted, as a cheap shortcut past the decompression probe.
+    if (looksLikeAitdPakTable(path, buf, n)) {
         QString base = path.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1).toUpper();
-        bool bodyName = base.contains(QStringLiteral("LSTBODY")) ||
-                        base.contains(QStringLiteral("LISTBODY")) ||
-                        base.contains(QStringLiteral("LISTBOD2"));
-        if (bodyName) {
+        if (base.endsWith(QStringLiteral(".PAK")) &&
+            (base.contains(QStringLiteral("LSTBODY")) ||
+             base.contains(QStringLiteral("LISTBODY")) ||
+             base.contains(QStringLiteral("LISTBOD2")))) {
             return FileType::AitdPak;
         }
-        if (looksLikeAitdPakTable(path, buf, n)) {
-            // Probing costs a few decompressions, so it runs only once the
-            // offset table has already been validated against the real file
-            // size — that gate rejects essentially everything that merely
-            // happens to start with four zero bytes.
-            return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
-        }
+        // Probing costs a few decompressions, so it runs only once the
+        // offset table has already been validated against the real file
+        // size — that gate rejects essentially everything that merely
+        // happens to start with four zero bytes.
+        return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
     }
 
     // Extension fallback for files whose magic didn't match (or short files).
     QString lower = path.toLower();
+    // Export output, not game data. Game folders accumulate these once
+    // people start converting things, and leaving them Unknown makes a
+    // browse look broken.
+    if (lower.endsWith(QStringLiteral(".obj")) || lower.endsWith(QStringLiteral(".ply")) ||
+        lower.endsWith(QStringLiteral(".mtl")) || lower.endsWith(QStringLiteral(".gltf")) ||
+        lower.endsWith(QStringLiteral(".glb"))) {
+        return FileType::ExportedModel;
+    }
+    if (lower.endsWith(QStringLiteral(".16x"))) return FileType::AitdPages;
+    if (lower.endsWith(QStringLiteral(".itd"))) return FileType::AitdData;
     if (lower.endsWith(QStringLiteral(".utf"))) return FileType::UtfTexture;
     if (lower.endsWith(QStringLiteral(".cel"))) return FileType::Cel;
     if (lower.endsWith(QStringLiteral(".anim")) || lower.endsWith(QStringLiteral(".anime"))) {
@@ -269,6 +287,9 @@ QString fileTypeLabel(FileType type) {
         case FileType::AitdPak: return QStringLiteral("3D models (AITD PAK)");
         case FileType::AitdImage: return QStringLiteral("Backdrop (AITD)");
         case FileType::AitdArchive: return QStringLiteral("Archive (AITD PAK)");
+        case FileType::AitdPages: return QStringLiteral("Document (AITD PAGES)");
+        case FileType::AitdData: return QStringLiteral("Engine data (AITD ITD)");
+        case FileType::ExportedModel: return QStringLiteral("Exported model");
         case FileType::Unknown: return QStringLiteral("Unknown");
     }
     return QStringLiteral("Unknown");

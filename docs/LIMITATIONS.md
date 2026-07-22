@@ -48,14 +48,23 @@ masks) are recognised as AITD archives but have no viewer. Rooms are the
 more interesting target: they would let a whole location be reconstructed
 rather than isolated props.
 
-### 🔧 `.ITD`, `.16X` and `.STK` are recognised but not decoded
+[AITD-roomviewer](https://github.com/tigrouind/AITD-roomviewer) already
+does this and is the obvious starting point — this is work, not research.
+The name databases (see below) name every camera and room, so a viewer
+would come with labels for free.
 
-- `OBJETS.ITD`, `VARS.ITD`, `DEFINES.ITD`, `PRIORITY.ITD` — game object and
-  variable tables
-- `*.16X` — in-game book/document pages, magic `PAGES:`
-- `*.STK` — string tables
+### 🔧 `.16X` documents and `.ITD` tables are recognised but not read
 
-All are small, all are plausibly readable, none is decoded.
+`*.16X` (in-game books and documents, `PAGES:` magic) and the `.ITD` engine
+tables (`OBJETS`, `VARS`, `DEFINES`, `PRIORITY`) are now identified in the
+browser but have no decoder. All are small and plausibly readable. The
+[SDA game-mechanics knowledge base](https://kb.speeddemosarchive.com/Alone_in_the_Dark_(1-3)/Game_Mechanics_and_Glitches)
+documents what many of the object and variable fields *do*, which makes
+`OBJETS.ITD` the most tractable of them.
+
+### 🔧 `.STK` string tables are not decoded
+
+Small, plausibly readable, nobody has done it.
 
 ### 🔧 Exported OBJ carries no UVs
 

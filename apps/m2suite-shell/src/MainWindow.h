@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <QElapsedTimer>
+#include <QHash>
 #include <QImage>
 #include <QMainWindow>
 
@@ -67,6 +68,7 @@ private slots:
     void showAboutDialog();
     void extractDiscImage();
     void convertImagesToUtf();
+    void loadAitdNameDbDialog();
 
 private:
     void scanFolderIntoTree(const QString& rootPath);
@@ -82,6 +84,10 @@ private:
     void showAitdPakFile(const QString& path);
     void showAitdImageFile(const QString& path);
     void aitdTick();
+    // Looks beside the PAK (and one level up) for an AITD_PakEdit-style
+    // "*_PAK_DB.json" and returns entry-index -> name for this archive.
+    // Empty when no database is present, which is the normal case.
+    QHash<int, QString> loadAitdNameDatabase(const QString& pakPath);
     void showElfFile(const QString& path);
     void showM1vcFile(const QString& path);
     void showFormTextFile(const QString& path, FileType type);
@@ -158,6 +164,7 @@ private:
     QString aitdPakPath_;
     QTimer* aitdTimer_ = nullptr;
     ModelViewport* modelView_ = nullptr;
+    QHash<int, QString> aitdNames_; // entry index -> name, from a PAK_DB.json
     // MPEG via Qt Multimedia on an extracted elementary stream
     QMediaPlayer* mediaPlayer_ = nullptr;
     QAudioOutput* mediaAudio_ = nullptr;

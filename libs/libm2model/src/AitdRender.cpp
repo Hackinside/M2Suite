@@ -150,17 +150,25 @@ bool renderAitdBody(const AitdBody& body, uint8_t* rgbaOut, uint32_t width, uint
                 size_t j = (i + 1) % m;
                 area2 += pv[pts[i]].x * pv[pts[j]].y - pv[pts[j]].x * pv[pts[i]].y;
             }
-            double shade = (area2 < 0) ? 0.6 : 1.0; // crude two-sided lighting
-            double dnorm = f.depth / (ext * 0.5 + 1.0);
-            shade *= std::clamp(0.72 + 0.28 * dnorm, 0.45, 1.15);
-
             uint8_t r, g, bl;
             if (materials) {
-                r = uint8_t(std::clamp(pal[f.pr->color * 3 + 0] * shade, 0.0, 255.0));
-                g = uint8_t(std::clamp(pal[f.pr->color * 3 + 1] * shade, 0.0, 255.0));
-                bl = uint8_t(std::clamp(pal[f.pr->color * 3 + 2] * shade, 0.0, 255.0));
+                // Faithful mode: the palette colour, unmodified. AITD has no
+                // lighting model — the artists baked shading into their
+                // choice of palette index per face, which is why adjacent
+                // faces already read as lit. An added light term double-
+                // shades the model and, with a two-sided winding test,
+                // dimmed most of it (Emily Hartwood came out near-black
+                // against a reference render of the same body).
+                r = pal[f.pr->color * 3 + 0];
+                g = pal[f.pr->color * 3 + 1];
+                bl = pal[f.pr->color * 3 + 2];
             } else {
-                uint8_t c = uint8_t(std::clamp(200.0 * shade, 0.0, 255.0));
+                // Neutral mode exists to read silhouette and form, so here
+                // shading is wanted: back faces darker, near faces brighter.
+                double shade = (area2 < 0) ? 0.62 : 1.0;
+                double dnorm = f.depth / (ext * 0.5 + 1.0);
+                shade *= std::clamp(0.72 + 0.28 * dnorm, 0.45, 1.15);
+                uint8_t c = uint8_t(std::clamp(210.0 * shade, 0.0, 255.0));
                 r = c; g = c; bl = uint8_t(c * 0.95);
             }
 

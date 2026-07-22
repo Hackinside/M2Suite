@@ -11,6 +11,7 @@
 //     collision volume and can be far larger) and not from unreferenced
 //     vertices (bone roots sitting at the origin). Both bugs pushed models
 //     off-centre or shrank them into a corner.
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -211,6 +212,119 @@ void testRenderKeepsSizeWhileOrbiting() {
     std::printf("  cube stays inside the frame across 8 orbit steps\n");
 }
 
+// Builds an animated body: flags carry INFO_ANIM, so a group table sits
+// between the vertices and the primitives, and the vertices are stored in
+// group-local space.
+std::vector<uint8_t> makeAnimatedBody(const std::vector<int16_t>& verts,
+                                       const std::vector<std::array<int, 3>>& groups,
+                                       const std::vector<uint8_t>& primBytes, size_t primCount) {
+    std::vector<uint8_t> d;
+    put16(d, 2); // INFO_ANIM, without INFO_OPTIMISE -> 0x10 group records
+    for (int i = 0; i < 6; ++i) {
+        put16(d, 0); // bounding box, unused by this test
+    }
+    put16(d, 0); // scratch buffer size
+    put16(d, uint16_t(verts.size() / 3));
+    for (int16_t v : verts) {
+        put16(d, uint16_t(v));
+    }
+    put16(d, uint16_t(groups.size()));
+    for (size_t i = 0; i < groups.size(); ++i) {
+        put16(d, uint16_t(i * 0x10)); // group-order table: byte offsets
+    }
+    for (const auto& g : groups) {
+        put16(d, uint16_t(g[0] * 6)); // start, as a byte offset
+        put16(d, uint16_t(g[1]));     // vertex count
+        put16(d, uint16_t(g[2] * 6)); // base vertex, as a byte offset
+        d.push_back(0xFF);            // parent group (-1)
+        d.push_back(0);               // group number
+        put16(d, 0);                  // transform type
+        put16(d, 0);                  // delta x
+        put16(d, 0);                  // delta y
+        put16(d, 0);                  // delta z
+    }
+    put16(d, uint16_t(primCount));
+    d.insert(d.end(), primBytes.begin(), primBytes.end());
+    return d;
+}
+
+void testGroupHierarchyResolves() {
+    // Vertex 0 is the root. Group 1 hangs off it and owns vertices 1-2,
+    // stored as offsets from vertex 0. Group 2 hangs off vertex 1 and owns
+    // vertex 3, so it only lands correctly if group 1 was resolved first —
+    // this is the cascade that makes stored order significant.
+    std::vector<int16_t> verts{
+        100, 200, 300, // v0: root, already in model space
+        10,  0,   0,   // v1: +10 x from v0  -> (110, 200, 300)
+        0,   10,  0,   // v2: +10 y from v0  -> (100, 210, 300)
+        0,   0,   5,   // v3: +5 z from v1   -> (110, 200, 305)
+    };
+    std::vector<std::array<int, 3>> groups{
+        {1, 2, 0}, // start=1, count=2, base=v0
+        {3, 1, 1}, // start=3, count=1, base=v1
+    };
+    std::vector<uint8_t> prims;
+    addPoly(prims, 9, {0, 1, 2});
+
+    m2model::AitdBody b =
+        m2model::parseAitdBody(makeAnimatedBody(verts, groups, prims, 1));
+    CHECK(b.valid);
+    CHECK(b.vertexCount() == 4);
+    CHECK(b.groups.size() == 2);
+    CHECK(b.groups[0].start == 1 && b.groups[0].vertexCount == 2);
+    CHECK(b.groups[0].baseVertex == 0);
+    CHECK(b.groups[1].baseVertex == 1);
+    CHECK(b.primitives.size() == 1); // group table consumed at the right size
+
+    // The root is untouched.
+    CHECK(b.vertices[0] == 100 && b.vertices[1] == 200 && b.vertices[2] == 300);
+    // Group 1's vertices moved to their base.
+    CHECK(b.vertices[3] == 110 && b.vertices[4] == 200 && b.vertices[5] == 300);
+    CHECK(b.vertices[6] == 100 && b.vertices[7] == 210 && b.vertices[8] == 300);
+    // Group 2 cascaded through the already-resolved vertex 1.
+    CHECK(b.vertices[9] == 110 && b.vertices[10] == 200 && b.vertices[11] == 305);
+    std::printf("  group hierarchy resolves, and cascades parent -> child\n");
+}
+
+void testGroupTableSizeAitd2() {
+    // Same body shape, but INFO_OPTIMISE selects 0x18-byte group records.
+    // Reading the wrong record size swallows the primitive count, so the
+    // primitive list is the thing that proves the stride was right.
+    std::vector<uint8_t> d;
+    put16(d, 2 | 8); // INFO_ANIM | INFO_OPTIMISE
+    for (int i = 0; i < 6; ++i) {
+        put16(d, 0);
+    }
+    put16(d, 0); // scratch
+    put16(d, 2); // two vertices
+    for (int16_t v : {int16_t(50), int16_t(60), int16_t(70), int16_t(1), int16_t(2), int16_t(3)}) {
+        put16(d, uint16_t(v));
+    }
+    put16(d, 1);      // one group
+    put16(d, 0);      // group order
+    put16(d, 1 * 6);  // start = vertex 1
+    put16(d, 1);      // count
+    put16(d, 0 * 6);  // base = vertex 0
+    d.push_back(0xFF);
+    d.push_back(0);
+    put16(d, 0);
+    put16(d, 0); put16(d, 0); put16(d, 0); // deltas
+    put16(d, 0); put16(d, 0); put16(d, 0); // rotate deltas (AITD2 only)
+    put16(d, 0);                            // padding (AITD2 only)
+    std::vector<uint8_t> prims;
+    addPoly(prims, 3, {0, 1, 0});
+    put16(d, 1);
+    d.insert(d.end(), prims.begin(), prims.end());
+
+    m2model::AitdBody b = m2model::parseAitdBody(d);
+    CHECK(b.valid);
+    CHECK(b.groups.size() == 1);
+    CHECK(b.primitives.size() == 1);
+    CHECK(b.primitives[0].color == 3);
+    CHECK(b.vertices[3] == 51 && b.vertices[4] == 62 && b.vertices[5] == 73);
+    std::printf("  AITD2 0x18-byte group records parse at the right stride\n");
+}
+
 void testObjExport() {
     std::vector<int16_t> verts{0, 0, 0, 100, 0, 0, 0, 100, 0};
     std::vector<uint8_t> prims;
@@ -276,6 +390,8 @@ void testAitdImage() {
 int main() {
     std::printf("test_aitd_synth:\n");
     testPolyTextureUvsKeepStreamInSync();
+    testGroupHierarchyResolves();
+    testGroupTableSizeAitd2();
     testRenderCentresOnDrawnGeometry();
     testRenderKeepsSizeWhileOrbiting();
     testObjExport();
