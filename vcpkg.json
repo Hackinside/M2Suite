@@ -1,0 +1,23 @@
+{
+  "name": "m2suite",
+  "version": "0.1.0",
+  "description": "Ultimate 3DO/Panasonic M2 developer suite: disassembler, converter+visualizer, emulator, compiler toolchain.",
+  "builtin-baseline": "f87344cac03158cbf1467264565f1fd36b382a24",
+  "dependencies": [
+    "libpng",
+    "zlib"
+  ],
+  "features": {
+    "gui": {
+      "description": "Qt6-based shell and visualizer apps (long vcpkg source build)",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": ["gui", "widgets", "png", "jpeg"]
+        },
+        "qtmultimedia"
+      ]
+    }
+  }
+}

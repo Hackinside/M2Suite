@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Known limitations
+    url: https://github.com/Hackinside/M2Suite/blob/main/docs/LIMITATIONS.md
+    about: Check here first — every known gap, and whether it's blocked on research or just on someone doing the work.
+  - name: Format documentation
+    url: https://github.com/Hackinside/M2Suite/blob/main/docs/FORMATS.md
+    about: Everything M2Suite knows about 3DO/M2 formats, graded by how well established each finding is.
+  - name: Building from source
+    url: https://github.com/Hackinside/M2Suite/blob/main/docs/BUILDING.md
+    about: Toolchain requirements and the traps in the build.

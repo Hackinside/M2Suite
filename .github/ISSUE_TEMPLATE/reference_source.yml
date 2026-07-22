@@ -1,0 +1,92 @@
+name: Reference source
+description: Suggest a spec, tool, decompilation or document we should be reading
+title: "[Source] "
+labels: ["reference"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        New sources are genuinely valuable — several entries in
+        [docs/REFERENCES.md](../blob/main/docs/REFERENCES.md) closed problems
+        that had been stuck for a long time.
+
+        A source that **disproves** something in
+        [docs/FORMATS.md](../blob/main/docs/FORMATS.md) is the most valuable
+        kind. Please say so in the title.
+
+  - type: input
+    id: name
+    attributes:
+      label: What is it?
+      placeholder: "e.g. fitd — Free In The Dark, an AITD engine reimplementation"
+    validations:
+      required: true
+
+  - type: input
+    id: url
+    attributes:
+      label: Where is it?
+      placeholder: "URL, repository, or where the document can be found"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of source?
+      options:
+        - Open-source implementation (a tool that actually decodes files)
+        - Official specification or SDK documentation
+        - Decompilation or disassembly
+        - Hardware documentation
+        - Reverse-engineering notes / forum thread / wiki
+        - Sample files or test data
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: covers
+    attributes:
+      label: What does it cover?
+      description: >
+        Which format, or which game. "Documents the ETAGE room format" is
+        much stronger than "might be useful for 3DO stuff".
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reliability
+    attributes:
+      label: How reliable is it?
+      description: >
+        A tool that *correctly decodes real files* beats a document, because
+        it can be tested.
+      options:
+        - "It works — I've used it to decode real files successfully"
+        - "Official documentation from the platform vendor"
+        - "Reverse-engineered notes with worked examples"
+        - "Reverse-engineered notes, unverified"
+        - "Haven't tested it myself"
+    validations:
+      required: true
+
+  - type: input
+    id: licence
+    attributes:
+      label: What licence is it under?
+      description: >
+        Critical if code might be borrowed. A source we can read but not
+        copy is still useful — findings are facts and aren't themselves
+        copyrightable — but that distinction has to be tracked deliberately.
+      placeholder: "e.g. GPL-2.0 / public domain / unknown / proprietary"
+    validations:
+      required: true
+
+  - type: textarea
+    id: contradicts
+    attributes:
+      label: Does it contradict anything we currently believe?
+      description: >
+        If so, quote the line from docs/FORMATS.md and say what this source
+        says instead.

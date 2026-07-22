@@ -1,0 +1,105 @@
+name: Bug report
+description: Something crashes, fails to open, or produces wrong output
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not attach game data.** Every asset M2Suite reads is
+        copyrighted — describe the file and paste a hex dump of its header
+        instead. See [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md).
+
+        The **Copy Info** button in the app puts the file details and full
+        path on your clipboard, which covers most of what is asked below.
+
+  - type: input
+    id: version
+    attributes:
+      label: M2Suite version
+      description: From `Help > About`, including the build number.
+      placeholder: "e.g. 0.9.0 build 142"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: What kind of failure is this?
+      options:
+        - Crash or hang
+        - Wrong output (it decodes, but the result is incorrect)
+        - Fails to open a file that should be supported
+        - Cosmetic artefact in otherwise correct output
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: file
+    attributes:
+      label: The file
+      description: >
+        Game, the exact path inside the game, size in bytes, and what
+        M2Suite reports it as. Paste the output of "Copy Info" if you have it.
+      placeholder: |
+        Game: Alone in the Dark 2 (1995)(Interplay)(US)
+        Path: 4LSTBODY.PAK
+        Size: 723900 bytes
+        M2Suite says: 3D models (AITD PAK), entry 273 of 553
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The exact error text, or a description of the wrong output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: header
+    attributes:
+      label: First 64 bytes of the file
+      description: >
+        For format bugs this is often the single most useful thing in the
+        report. PowerShell:
+        `Format-Hex -Path FILE -Count 64`
+      render: text
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant lines from m2suite.log
+      description: The log sits beside the executable.
+      render: text
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Do other files of the same type work?
+      description: >
+        "This is the only .cel in the game that fails" and "every .cel in
+        this game fails" lead to very different investigations.
+
+  - type: input
+    id: regression
+    attributes:
+      label: Did this work in an earlier version?
+      description: If so, which one?
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot
+      description: >
+        Required for anything visual. Wrong colours, wrong geometry and
+        wrong layout look identical in prose and completely different to us.

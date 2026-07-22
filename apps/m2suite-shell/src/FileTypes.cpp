@@ -1,0 +1,260 @@
+#include "FileTypes.h"
+
+#include <QFile>
+
+#include "m2model/AitdImage.h"
+#include "m2model/AitdPak.h"
+
+namespace m2suite {
+
+namespace {
+
+// Probes an AITD PAK for real 3D bodies. Nearly any blob can be coerced
+// through the body parser, so require several entries that carry genuine
+// geometry before calling the archive a model archive; this cleanly
+// separates 4LSTBODY/LISTBODY (hundreds of bodies) from MASK/ANIM/ETAGE
+// PAKs, which yield at most a couple of false positives.
+bool aitdPakHoldsModels(const QString& path) {
+    try {
+        auto pak = m2model::AitdPak::openFromFile(path.toStdWString());
+        size_t entries = pak.entryCount();
+        if (entries < 4) {
+            return false;
+        }
+        size_t probe = std::min<size_t>(entries, 24);
+        size_t hits = 0;
+        for (size_t i = 0; i < probe; ++i) {
+            auto body = m2model::parseAitdBody(pak.read(i));
+            if (body.valid && body.vertexCount() >= 4 && body.primitives.size() >= 2) {
+                ++hits;
+            }
+        }
+        return hits * 2 >= probe; // at least half the sampled entries
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool tagIs(const char* buf, const char* tag) {
+    return buf[0] == tag[0] && buf[1] == tag[1] && buf[2] == tag[2] && buf[3] == tag[3];
+}
+
+// True when a 'CCB '-led file contains more than one cel, i.e. it's really
+// a frame sequence. Walks the flat chunk chain (cel sizes include the
+// 8-byte header) and stops as soon as a second CCB is seen, so this stays
+// cheap even on large files.
+bool isCelChainAnimation(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    qint64 fileSize = file.size();
+    qint64 pos = 0;
+    int ccbCount = 0;
+    for (int guard = 0; guard < 64 && pos + 8 <= fileSize; ++guard) {
+        if (!file.seek(pos)) {
+            break;
+        }
+        unsigned char hdr[8];
+        if (file.read(reinterpret_cast<char*>(hdr), 8) != 8) {
+            break;
+        }
+        quint32 size = (quint32(hdr[4]) << 24) | (quint32(hdr[5]) << 16) |
+                       (quint32(hdr[6]) << 8) | hdr[7];
+        if (size < 8 || pos + qint64(size) > fileSize) {
+            break; // malformed / trailing data
+        }
+        if (tagIs(reinterpret_cast<const char*>(hdr), "CCB ") && ++ccbCount > 1) {
+            return true;
+        }
+        pos += size;
+    }
+    return false;
+}
+} // namespace
+
+FileType sniffFileType(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        return FileType::Unknown;
+    }
+    char buf[12] = {};
+    qint64 n = file.read(buf, 12);
+    file.close();
+
+    const auto* ubuf = reinterpret_cast<const unsigned char*>(buf);
+    if (n >= 4 && buf[0] == 0x7F && buf[1] == 'E' && buf[2] == 'L' && buf[3] == 'F') {
+        return FileType::Elf;
+    }
+    if (n >= 4 && tagIs(buf, "CCB ")) {
+        // A file can be a chain of complete cels — that's an animation, not
+        // a still (Yu Yu Hakusho's GRAPH/*.anim are 12 back-to-back
+        // CCB+XTRA+PDAT groups). Walk the chunk chain far enough to see
+        // whether a second CCB follows.
+        if (isCelChainAnimation(path)) {
+            return FileType::Anim;
+        }
+        return FileType::Cel;
+    }
+    if (n >= 4 && tagIs(buf, "ANIM")) {
+        return FileType::Anim;
+    }
+    if (n >= 4 && tagIs(buf, "IMAG")) {
+        return FileType::Imag;
+    }
+    if (n >= 4 && tagIs(buf, "SHDR")) {
+        return FileType::StreamFile;
+    }
+    // Standalone 3DO film: 'FILM' + size + 'FDSC' descriptor chunk.
+    if (n >= 12 && tagIs(buf, "FILM") && tagIs(buf + 8, "FDSC")) {
+        return FileType::FilmFile;
+    }
+    // Some DataStreamer files pad before the header (Need For Speed's
+    // Movies/*.Stream open with a FILL block), so a leading FILL still
+    // means a stream — the loader scans forward for the SHDR.
+    if (n >= 4 && tagIs(buf, "FILL")) {
+        return FileType::StreamFile;
+    }
+    if (n >= 12 && tagIs(buf, "RIFF") && tagIs(buf + 8, "WAVE")) {
+        return FileType::Wav;
+    }
+    // Standard image formats Qt can load directly.
+    if (n >= 4 && buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == '8') {
+        return FileType::StandardImage;
+    }
+    if (n >= 3 && ubuf[0] == 0xFF && ubuf[1] == 0xD8 && ubuf[2] == 0xFF) {
+        return FileType::StandardImage; // JPEG
+    }
+    if (n >= 8 && ubuf[0] == 0x89 && buf[1] == 'P' && buf[2] == 'N' && buf[3] == 'G') {
+        return FileType::StandardImage;
+    }
+    if (n >= 2 && buf[0] == 'B' && buf[1] == 'M') {
+        return FileType::StandardImage;
+    }
+    if (n >= 12 && (tagIs(buf, "FORM") || tagIs(buf, "CAT "))) {
+        const char* type = buf + 8;
+        if (tagIs(type, "TXTR")) return FileType::UtfTexture;
+        if (tagIs(type, "AIFF")) return FileType::Aiff;
+        if (tagIs(type, "AIFC")) return FileType::Aifc;
+        if (tagIs(type, "3INS")) return FileType::Instrument;
+        if (tagIs(type, "FONT")) return FileType::Font;
+        if (tagIs(type, "DDF ")) return FileType::Ddf;
+        if (tagIs(type, "INTL")) return FileType::Intl;
+    }
+    if (n >= 12 && tagIs(buf + 8, "TAG0")) {
+        if (tagIs(buf, "PEBM")) return FileType::Pebm;
+        if (tagIs(buf, "M1VC")) return FileType::M1vc;
+    }
+
+    // --- Alone in the Dark ------------------------------------------------
+    // AITD backdrops (.pics/.bob/.pad) are raw paletted pages with no magic,
+    // so they are identified structurally.
+    if (m2model::looksLikeAitdImage(reinterpret_cast<const uint8_t*>(buf), size_t(n))) {
+        return FileType::AitdImage;
+    }
+
+    // AITD archives have no magic either — they open with a little-endian
+    // offset table whose first entry is 0 and whose second is the table
+    // size. A sweep of both 3DO AITD games showed the body archives are
+    // exactly LISTBODY/LISTBOD2 (AITD1, 272 models each) and the numbered
+    // *LSTBODY.PAK (AITD2, 553); every other PAK holds anims, masks,
+    // floors, scripts or samples. Name-matching alone would miss renamed
+    // archives, so fall back to probing the contents.
+    {
+        QString base = path.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1).toUpper();
+        bool bodyName = base.contains(QStringLiteral("LSTBODY")) ||
+                        base.contains(QStringLiteral("LISTBODY")) ||
+                        base.contains(QStringLiteral("LISTBOD2"));
+        if (bodyName) {
+            return FileType::AitdPak;
+        }
+        if (n >= 8 && buf[0] == 0 && buf[1] == 0 && buf[2] == 0 && buf[3] == 0) {
+            quint32 tableSize = quint32(quint8(buf[4])) | (quint32(quint8(buf[5])) << 8) |
+                                (quint32(quint8(buf[6])) << 16) | (quint32(quint8(buf[7])) << 24);
+            if (tableSize >= 8 && tableSize % 4 == 0 && tableSize < 0x100000) {
+                return aitdPakHoldsModels(path) ? FileType::AitdPak : FileType::AitdArchive;
+            }
+        }
+    }
+
+    // Extension fallback for files whose magic didn't match (or short files).
+    QString lower = path.toLower();
+    if (lower.endsWith(QStringLiteral(".utf"))) return FileType::UtfTexture;
+    if (lower.endsWith(QStringLiteral(".cel"))) return FileType::Cel;
+    if (lower.endsWith(QStringLiteral(".anim")) || lower.endsWith(QStringLiteral(".anime"))) {
+        return FileType::Anim;
+    }
+    if (lower.endsWith(QStringLiteral(".aiff")) || lower.endsWith(QStringLiteral(".aif"))) {
+        return FileType::Aiff;
+    }
+    if (lower.endsWith(QStringLiteral(".aifc"))) return FileType::Aifc;
+    if (lower.endsWith(QStringLiteral(".sc"))) return FileType::Aifc; // Yu Yu Hakusho sound
+    if (lower.endsWith(QStringLiteral(".wav"))) return FileType::Wav;
+    if (lower.endsWith(QStringLiteral(".str")) || lower.endsWith(QStringLiteral(".stream")) ||
+        lower.endsWith(QStringLiteral(".cine"))) {
+        return FileType::StreamFile;
+    }
+    if (lower.endsWith(QStringLiteral(".film")) || lower.endsWith(QStringLiteral(".movie"))) {
+        return FileType::FilmFile;
+    }
+    if (lower.endsWith(QStringLiteral(".gif")) || lower.endsWith(QStringLiteral(".jpg")) ||
+        lower.endsWith(QStringLiteral(".jpeg")) || lower.endsWith(QStringLiteral(".png")) ||
+        lower.endsWith(QStringLiteral(".bmp"))) {
+        return FileType::StandardImage;
+    }
+    return FileType::Unknown;
+}
+
+QString fileTypeLabel(FileType type) {
+    switch (type) {
+        case FileType::UtfTexture: return QStringLiteral("Texture (UTF)");
+        case FileType::Cel: return QStringLiteral("Image (CEL)");
+        case FileType::Anim: return QStringLiteral("Animation (ANIM)");
+        case FileType::Imag: return QStringLiteral("Image (IMAG)");
+        case FileType::Aiff: return QStringLiteral("Audio (AIFF)");
+        case FileType::Aifc: return QStringLiteral("Audio (AIFC)");
+        case FileType::Wav: return QStringLiteral("Audio (WAV)");
+        case FileType::StandardImage: return QStringLiteral("Image (GIF/JPG/PNG)");
+        case FileType::StreamFile: return QStringLiteral("Stream (.str)");
+        case FileType::Instrument: return QStringLiteral("Instrument (3INS)");
+        case FileType::Font: return QStringLiteral("Font");
+        case FileType::Ddf: return QStringLiteral("Device desc (DDF)");
+        case FileType::Intl: return QStringLiteral("Locale (INTL)");
+        case FileType::Pebm: return QStringLiteral("M2 bitmap (PEBM)");
+        case FileType::M1vc: return QStringLiteral("M1 video (M1VC)");
+        case FileType::Elf: return QStringLiteral("Executable (ELF)");
+        case FileType::FilmFile: return QStringLiteral("Film (Cinepak)");
+        case FileType::AitdPak: return QStringLiteral("3D models (AITD PAK)");
+        case FileType::AitdImage: return QStringLiteral("Backdrop (AITD)");
+        case FileType::AitdArchive: return QStringLiteral("Archive (AITD PAK)");
+        case FileType::Unknown: return QStringLiteral("Unknown");
+    }
+    return QStringLiteral("Unknown");
+}
+
+bool fileTypeHasPreview(FileType type) {
+    switch (type) {
+        case FileType::UtfTexture:
+        case FileType::Cel:
+        case FileType::Anim:
+        case FileType::Imag:
+        case FileType::Aiff:
+        case FileType::Aifc:
+        case FileType::Wav:
+        case FileType::StandardImage:
+        case FileType::StreamFile:
+        case FileType::FilmFile:   // standalone Cinepak film
+        case FileType::AitdImage:  // paletted backdrop pages
+        case FileType::AitdPak:    // interactive 3D model view
+        case FileType::Elf:        // disassembly view
+        case FileType::M1vc:       // MPEG video in a TAG0 container
+        case FileType::Ddf:        // IFF FORM shown as structured text
+        case FileType::Intl:       // locale FORM shown as text
+        case FileType::Instrument: // DSP 3INS structure view
+            return true;
+        default:
+            return false;
+    }
+}
+
+} // namespace m2suite

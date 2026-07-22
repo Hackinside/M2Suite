@@ -1,0 +1,93 @@
+name: Format finding
+description: You worked out how a format (or part of one) is laid out
+title: "[Format] "
+labels: ["format-finding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is the most valuable kind of contribution to this project, and
+        it needs no code.
+
+        **Findings that contradict
+        [docs/FORMATS.md](../blob/main/docs/FORMATS.md) are the most valuable
+        of all** — several entries there are corrections of things that were
+        confidently wrong for a long time. Please put "contradicts" in the
+        title if yours is one.
+
+        **Do not attach game data.** Hex dumps of the relevant bytes are
+        fine and are usually what's needed.
+
+  - type: input
+    id: format
+    attributes:
+      label: Which format?
+      placeholder: "e.g. AITD ETAGE room archive / PEBM / UTF RLE texel data"
+    validations:
+      required: true
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Which files show this?
+      description: Game, path inside the game, size. As many examples as you have.
+    validations:
+      required: true
+
+  - type: textarea
+    id: layout
+    attributes:
+      label: The layout
+      description: >
+        Offsets, field sizes, endianness. Pseudo-struct notation is ideal.
+      render: text
+      placeholder: |
+        u16 width          // 320 in every file seen
+        u16 height         // 200
+        u8  palette[768]   // 256 RGB triples, 8 bits per channel
+        u8  pixels[w*h]    // one palette index per pixel
+    validations:
+      required: true
+
+  - type: dropdown
+    id: confidence
+    attributes:
+      label: How confident are you?
+      description: >
+        docs/FORMATS.md grades every finding this way. "Assumed" is a
+        perfectly respectable contribution as long as it's labelled.
+      options:
+        - "Verified — checked against something independent"
+        - "Consistent — explains every file I have, nothing external corroborates it"
+        - "Assumed — a working guess that hasn't failed yet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: method
+    attributes:
+      label: How did you establish it?
+      description: >
+        This matters more than the finding itself, because undocumented
+        formats don't announce their own errors — a wrong offset produces
+        *plausible* output rather than failing.
+
+        "The file is exactly 4 + 768 + 320×200 bytes" is verifiable.
+        "It looks like a palette" is a hypothesis.
+    validations:
+      required: true
+
+  - type: textarea
+    id: explains
+    attributes:
+      label: What does this explain that the current understanding doesn't?
+      description: >
+        If it contradicts something in docs/FORMATS.md, quote that line here.
+
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources you used
+      description: >
+        Tools, specs, decompilations. If any of them should be added to
+        docs/REFERENCES.md, say so.

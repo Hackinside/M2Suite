@@ -1,0 +1,14 @@
+build/
+out/
+.vs/
+.vscode/
+*.user
+CMakeUserPresets.json
+vcpkg_installed/
+
+# Built artefacts belong in Releases, not in git history — a 24 MB zip in
+# every clone forever is not worth the convenience.
+*.zip
+*.exe
+*.dll
+*.pdb

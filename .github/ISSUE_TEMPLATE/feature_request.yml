@@ -1,0 +1,77 @@
+name: Feature request
+description: Ask for a capability M2Suite doesn't have yet
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Please read [docs/LIMITATIONS.md](../blob/main/docs/LIMITATIONS.md)
+        first.** It lists the known gaps and marks each as blocked on
+        knowledge (🔬), blocked on work (🔧), or out of scope (🚫). If your
+        request is already listed, add your use case to the existing issue
+        instead — knowing that someone actually wants a thing is what moves
+        it up the list.
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Preflight
+      options:
+        - label: I checked docs/LIMITATIONS.md and this isn't already tracked
+          required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What do you want to be able to do?
+      description: >
+        Describe the outcome, not the implementation — "export AITD models
+        so Blender opens them with materials", rather than "add glTF
+        support". The outcome sometimes has a cheaper answer than the
+        implementation you had in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Which games and file types does this apply to?
+      description: >
+        If you're asking for support for a whole new game, please scope it:
+        name the specific file types, and give a directory listing with
+        sizes and header bytes. A "format finding" issue is often the more
+        useful thing to open in that case.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What do you do today instead?
+      description: >
+        An existing painful workaround is strong evidence that this is worth
+        building. "Nothing, I gave up" is also a useful answer.
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often would you use this?
+      options:
+        - Routinely — it's part of a workflow
+        - Occasionally
+        - Once, for a specific project
+    validations:
+      required: true
+
+  - type: dropdown
+    id: help
+    attributes:
+      label: Could you help build it?
+      options:
+        - "No, but I can test it"
+        - "I could help with research or format analysis"
+        - "I could write the code"
+        - "No"
+    validations:
+      required: true

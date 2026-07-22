@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>m2suite_icon.png</file>
+        <file>logo.png</file>
+        <file>mascot.png</file>
+    </qresource>
+</RCC>
