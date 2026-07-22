@@ -6,9 +6,22 @@ out/
 CMakeUserPresets.json
 vcpkg_installed/
 
-# Built artefacts belong in Releases, not in git history — a 24 MB zip in
-# every clone forever is not worth the convenience.
-*.zip
+# Build litter. The portable package under dist/ is committed on purpose
+# (see docs/RELEASING.md) — everything else binary stays out.
+*.obj
+*.ilk
+*.pdb
+*.log
 *.exe
 *.dll
-*.pdb
+*.zip
+!dist/M2Suite-portable.zip
+
+# Never commit game data — see CONTRIBUTING.md.
+*.iso
+*.bin
+*.cue
+*.img
+*.chd
+*.pak
+*.PAK

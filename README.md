@@ -45,16 +45,27 @@ this project; the application is what proves the findings work.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the libraries and the shell fit together |
 | [docs/LIMITATIONS.md](docs/LIMITATIONS.md) | What does not work yet, and the open challenge behind each gap |
 | [docs/REFERENCES.md](docs/REFERENCES.md) | Every source this work builds on, and how to propose a new one |
+| [docs/RELEASING.md](docs/RELEASING.md) | How the portable package is built and published |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Bug reports, feature requests, format findings, code |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | How we treat each other |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 
 ## Quick start
 
-### Run a release build
+### Download and run — no build required
 
-Download the portable package from the Releases page, unzip it anywhere and
-run `m2suite-shell.exe`. The Qt runtime, the Visual C++ runtime, FFmpeg and
-all Qt plugins ship inside the folder — no install, no admin rights.
+**[⬇ Latest release](https://github.com/Hackinside/M2Suite/releases/latest)**
+· or grab
+[`dist/M2Suite-portable.zip`](dist/M2Suite-portable.zip) straight from this
+repository.
+
+Unzip it anywhere and run `m2suite-shell.exe`. The Qt runtime, the Visual
+C++ runtime, FFmpeg and all Qt plugins ship inside the folder — no
+installer, no admin rights, no registry. Copy the folder to another Windows
+10/11 x64 machine and it runs as-is.
+
+The in-repo copy is refreshed on every release, so you never need a working
+MSVC + vcpkg setup just to look inside a game you own.
 
 ### Build from source
 
@@ -104,21 +115,18 @@ open-source tool? Open a **Reference source** issue; see
 
 ## Licensing
 
-> **⚠ Publishing this repository is not yet cleared.**
-> `libs/libm2core` and `libs/libm2texture` are ported from 3DO M2 SDK source
-> that carries an explicit confidentiality notice. The 3DO Company dissolved
-> in 2003 and the disposition of its IP has not been researched or resolved.
-> **Read [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) before making
-> this repository public or cutting a release.**
+M2Suite is licensed under **[GPL-3.0-or-later](LICENSE)**.
 
-The original M2Suite code has **no licence chosen yet** — until one is
-added, treat it as all-rights-reserved and open an issue if you need
-specific terms.
-
-Third-party code vendored into this tree keeps its own licence; every piece
-is listed with its terms in
+Provenance and attribution for everything the project builds on — the 3DO M2
+SDK, the public-domain PKWARE decoder, the AITD reference implementations,
+and the Qt/FFmpeg runtime bundled at release — is recorded in
 [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-M2Suite ships no game data. 3DO, Panasonic M2, and every game named in this
-repository are the property of their respective owners; the formats are
-documented here for preservation and interoperability.
+**Disclaimer.** M2Suite is an independent, non-commercial interoperability
+and preservation project, not affiliated with or endorsed by The 3DO
+Company, Panasonic, Konami, or any game publisher. It ships **no game data,
+no SDK, and no BIOS images** — it reads files you already own. Trademarks
+belong to their respective owners and are used only to identify the formats
+and titles described. If you hold rights to any referenced material and
+object to its use here, please open an issue and it will be addressed
+promptly.

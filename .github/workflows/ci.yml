@@ -1,0 +1,74 @@
+name: CI
+
+# Builds the format libraries and runs the test suite on every push and PR.
+#
+# Only the `core-msvc` preset runs here, deliberately: it needs no Qt and no
+# FFmpeg, so it configures in seconds. The full GUI preset would pull Qt6
+# through vcpkg and take hours on a cold runner for very little extra
+# signal — every format decision lives in the libraries, which is exactly
+# what this job covers.
+#
+# The GUI build is verified locally before a release; see docs/RELEASING.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build core libraries and run tests
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake --preset core-msvc
+
+      - name: Build
+        run: cmake --build --preset core-msvc
+
+      - name: Test
+        run: ctest --preset core-msvc --output-on-failure
+
+  no-game-data:
+    name: Check that no game data was committed
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # M2Suite must never carry game assets — see CONTRIBUTING.md. This is
+      # a coarse tripwire, not a proof: it catches the accidental commit of
+      # a disc image or an archive dropped in to reproduce a bug.
+      - name: Look for disc images and game archives
+        run: |
+          matches=$(git ls-files | grep -Ei '\.(iso|bin|cue|img|chd|pak|utf|cel|anim|imag|aifc|str|stream|film|cine|itd|pics|bob|pad)$' || true)
+          if [ -n "$matches" ]; then
+            echo "::error::Files that look like game data were committed:"
+            echo "$matches"
+            exit 1
+          fi
+          echo "No game data found."
+
+      - name: Look for unexpectedly large files
+        run: |
+          # The portable package in dist/ is the one binary we ship on
+          # purpose; anything else over 5 MB deserves a human look.
+          large=$(git ls-files | grep -v '^dist/' | while read -r f; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -gt 5242880 ]; then echo "$f ($((size/1048576)) MB)"; fi
+          done)
+          if [ -n "$large" ]; then
+            echo "::error::Large files outside dist/:"
+            echo "$large"
+            exit 1
+          fi
+          echo "No unexpected large files."

@@ -194,9 +194,20 @@ check what game data looks like.
 
 ## Licensing note for contributors
 
-The original M2Suite code has **no licence chosen yet**, and parts of the
-tree derive from sources whose redistribution terms are unresolved (see
-[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)). Until that is settled,
-please do not assume contributed code can be redistributed under any
-particular terms, and raise licensing questions in an issue rather than in a
-pull request.
+M2Suite is **[GPL-3.0-or-later](LICENSE)**. By opening a pull request you
+agree your contribution is licensed under those terms.
+
+Two things to keep clean:
+
+- **Don't paste code from sources you can't license under GPL-3.0.** Reading
+  a reference implementation to understand a *format* is fine and is how
+  most of this project was built — formats are facts. Copying its
+  implementation is not, unless its licence permits it. If you're unsure,
+  say where you looked in the PR description; that's better than staying
+  quiet.
+- **Record provenance.** If you derive something from a specific external
+  source, add it to [docs/REFERENCES.md](docs/REFERENCES.md), and to
+  [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) if any code is
+  actually vendored.
+
+Licensing questions belong in an issue, not buried in a PR thread.

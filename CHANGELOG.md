@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Project
+
+- **Licensed under GPL-3.0-or-later.** M2Suite now carries an explicit
+  licence, so contributors know where they stand and the project can reuse
+  GPL-compatible preservation code (including the MAME-derived PowerPC
+  disassembler, if it is brought back in).
+- **Provenance and disclaimer written down.**
+  [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) now records where every
+  piece came from — the 3DO M2 SDK, the public-domain PKWARE decoder, the
+  AITD reference implementations, and the Qt/FFmpeg runtime bundled at
+  release — alongside a plain statement that this is a non-commercial
+  preservation project shipping no game data, no SDK and no BIOS images.
+- **The portable package ships in the repository**
+  ([`dist/M2Suite-portable.zip`](dist/M2Suite-portable.zip)) as well as in
+  Releases, so nobody needs a working MSVC + vcpkg setup — and an eight-hour
+  first FFmpeg build — just to open a game they own.
+- `build.ps1 -Package` stages and zips the portable build, using an
+  allow-list of file types so build litter (a 25 MB `.pdb`, CMake install
+  scripts) cannot leak into a release.
+- Added [docs/RELEASING.md](docs/RELEASING.md),
+  [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), a pull-request template, and CI
+  that builds the format libraries, runs the tests, and fails the build if
+  anything resembling game data or an unexpected large file is committed.
+
 ### Alone in the Dark — 3D viewport rewritten
 
 - **Interactive camera.** The model view is now a proper viewport:
